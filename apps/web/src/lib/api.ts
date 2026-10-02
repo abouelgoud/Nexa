@@ -1,7 +1,25 @@
 "use client";
 
-/** Thin fetch wrapper: adds the JWT and tenant header, and turns API errors into readable messages. */
-export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+/**
+ * Thin fetch wrapper: adds the JWT and tenant header, and turns API errors into readable messages.
+ * By default requests go to /api on this origin and Next.js proxies them to the API (see next.config.ts).
+ */
+const CONFIGURED_API_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
+const LOCAL_HOSTS = ["localhost", "127.0.0.1", "[::1]"];
+
+/** A localhost API address only works when the page is also opened on localhost; otherwise use the proxy. */
+function resolveApiUrl(): string {
+  if (typeof window === "undefined" || CONFIGURED_API_URL.startsWith("/")) return CONFIGURED_API_URL;
+  try {
+    const target = new URL(CONFIGURED_API_URL);
+    if (LOCAL_HOSTS.includes(target.hostname) && !LOCAL_HOSTS.includes(window.location.hostname)) return "/api";
+  } catch {
+    return "/api";
+  }
+  return CONFIGURED_API_URL;
+}
+
+export const API_URL = resolveApiUrl();
 
 export class ApiError extends Error {
   status: number;
@@ -61,6 +79,10 @@ export async function api<T = any>(path: string, opts: Options = {}): Promise<T>
     res = await fetch(`${API_URL}${path}`, { ...opts, headers, body });
   } catch {
     throw new ApiError(0, "network", "Cannot reach the server. Check that the API is running.");
+  }
+  if (res.status >= 500 && !res.headers.get("content-type")?.includes("application/json")) {
+    // The web app's /api proxy answered, but the API behind it did not.
+    throw new ApiError(res.status, "network", "The API is not responding. Check that the api service is running.");
   }
   if (res.status === 204) return undefined as T;
   const data = await res.json().catch(() => ({}));

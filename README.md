@@ -43,7 +43,7 @@ Workflow mode runs fully without an LLM; agent mode (LLM chooses actions) needs 
 cd apps/api && pip install -e '.[dev]'
 alembic upgrade head && uvicorn nexa.main:app --reload --port 8000
 # Web
-npm install && NEXT_PUBLIC_API_URL=http://localhost:8000 npm run dev
+npm install && npm run dev            # proxies /api to API_INTERNAL_URL (default http://localhost:8000)
 # Worker
 PYTHONPATH=apps/worker python -m nexa_worker.main
 # Demo clinic DB: psql -d clinic_demo -f infrastructure/postgres/clinic_demo.sql

@@ -84,7 +84,9 @@ services:
       context: .
       dockerfile: infrastructure/docker/web.Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:8000}
+        API_INTERNAL_URL: http://api:8000
+        # Leave empty to proxy through the web app (/api). Set only to call the API directly from browsers.
+        NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:-}
     ports: ["${WEB_PORT:-3000}:3000"]
     depends_on: [api]
 

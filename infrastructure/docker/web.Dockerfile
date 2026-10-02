@@ -10,8 +10,10 @@ COPY packages/workflow-engine/package.json packages/workflow-engine/package.json
 RUN npm ci --workspaces --include-workspace-root
 
 FROM deps AS build
-ARG NEXT_PUBLIC_API_URL=http://localhost:8000
-ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL NEXT_TELEMETRY_DISABLED=1
+# Browser calls go to /api on the web origin; the Next.js server proxies them to API_INTERNAL_URL.
+ARG API_INTERNAL_URL=http://api:8000
+ARG NEXT_PUBLIC_API_URL=
+ENV API_INTERNAL_URL=$API_INTERNAL_URL NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL NEXT_TELEMETRY_DISABLED=1
 COPY packages packages
 COPY apps/web apps/web
 RUN npm run build -w @nexa/web
