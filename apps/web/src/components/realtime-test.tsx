@@ -23,6 +23,8 @@ export function RealtimeTest({ agentId, use }: { agentId: string; use: "draft" |
   const [callId, setCallId] = useState<string | null>(null);
   const [detail, setDetail] = useState<CallDetail | null>(null);
   const [status, setStatus] = useState("idle");
+  const [agentJoined, setAgentJoined] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
   const audioHost = useRef<HTMLDivElement>(null);
 
@@ -42,8 +44,22 @@ export function RealtimeTest({ agentId, use }: { agentId: string; use: "draft" |
     return () => clearInterval(timer);
   }, [roomName, callId]);
 
+  // Explain stalls instead of waiting silently: the agent never joined, or joined but could not start the call.
+  useEffect(() => {
+    if (status !== "connected") return;
+    const timer = setTimeout(() => {
+      if (!agentJoined) {
+        setProblem("The voice agent did not join the call. Make sure the voice-runtime service is running and up to date: " +
+          "docker compose up -d --build voice-runtime  (logs: docker compose logs voice-runtime).");
+      } else if (!callId) {
+        setProblem("The voice agent joined but could not start the call. Check: docker compose logs voice-runtime.");
+      }
+    }, 20000);
+    return () => clearTimeout(timer);
+  }, [status, agentJoined, callId]);
+
   const start = async () => {
-    setError(null); setDetail(null); setCallId(null); setStatus("connecting");
+    setError(null); setDetail(null); setCallId(null); setStatus("connecting"); setAgentJoined(false); setProblem(null);
     try {
       const { Room, RoomEvent, Track } = await import("livekit-client");
       const info = await post<{ url: string; token: string; room: string }>("/test/realtime", { agent_id: agentId, use });
@@ -52,8 +68,16 @@ export function RealtimeTest({ agentId, use }: { agentId: string; use: "draft" |
         if (track.kind === Track.Kind.Audio) audioHost.current?.appendChild(track.attach());
       });
       r.on(RoomEvent.Disconnected, () => setStatus("ended"));
+      r.on(RoomEvent.ParticipantConnected, (p) => {
+        if (p.isAgent) { setAgentJoined(true); setProblem(null); }
+      });
       await r.connect(info.url, info.token);
-      await r.localParticipant.setMicrophoneEnabled(true);
+      if ([...r.remoteParticipants.values()].some((p) => p.isAgent)) setAgentJoined(true);
+      try {
+        await r.localParticipant.setMicrophoneEnabled(true);
+      } catch {
+        setProblem("Microphone access was blocked. Allow the microphone for this site and start the call again.");
+      }
       setRoom(r); setRoomName(info.room); setStatus("connected");
     } catch (e) {
       setStatus("idle");
@@ -79,6 +103,12 @@ export function RealtimeTest({ agentId, use }: { agentId: string; use: "draft" |
         </CardHeader>
         <CardContent className="space-y-3">
           <Alert variant="info">Speak naturally - you can interrupt the agent at any time. Uses the same runtime as phone calls.</Alert>
+          {status === "connected" && !problem && (
+            <p className="text-sm text-muted-foreground">
+              {!agentJoined ? "Connected. Waiting for the AI agent to join…" : !callId ? "Agent joined. Starting the call…" : "Agent is listening - say something."}
+            </p>
+          )}
+          {problem && <Alert variant="warning">{problem}</Alert>}
           <ErrorBox error={error} />
           <div className="h-[380px] space-y-2 overflow-y-auto rounded-lg bg-muted/40 p-3">
             {detail?.messages.map((m) => (
@@ -94,7 +124,9 @@ export function RealtimeTest({ agentId, use }: { agentId: string; use: "draft" |
       <Card className="lg:col-span-2">
         <CardHeader><CardTitle className="text-sm">Live debugging</CardTitle></CardHeader>
         <CardContent className="space-y-2 text-sm">
-          {!detail && <p className="text-muted-foreground">Waiting for the call to start…</p>}
+          {!detail && <p className="text-muted-foreground">
+            {status !== "connected" ? "Start a real-time call to see live data." : !agentJoined ? "Waiting for the AI agent to join…" : "Waiting for the call to start…"}
+          </p>}
           {detail && (<>
             <div>Language: <b>{detail.call.language ?? "-"}</b> · Dialect: <b>{dialectName(lastUser?.dialect ?? detail.call.dialect)}</b></div>
             <div>Intent: <b>{detail.call.intent ?? "-"}</b> · Avg response: {detail.call.metrics.avg_turn_latency_ms ?? "-"} ms</div>
