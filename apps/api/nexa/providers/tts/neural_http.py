@@ -15,7 +15,7 @@ from nexa.providers.tts.base import SynthesisResult, TTSError, TTSProvider
 class NeuralHTTPTTS(TTSProvider):
     name = "neural"
 
-    def __init__(self, base_url: str, timeout: float = 60.0, transport: httpx.AsyncBaseTransport | None = None,
+    def __init__(self, base_url: str, timeout: float = 300.0, transport: httpx.AsyncBaseTransport | None = None,
                  restore: Callable[[str], Awaitable[bytes | None]] | None = None):
         self.base_url = base_url.rstrip("/")
         self._client = httpx.AsyncClient(timeout=timeout, transport=transport)

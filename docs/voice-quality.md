@@ -9,10 +9,22 @@ the **recognition engine per deployment** (`STT_PROVIDER`). Everything sits behi
 | Provider | Where it runs | Sound | Dialects | Your own voice | Needs |
 |---|---|---|---|---|---|
 | **Standard** (Piper) | your servers, CPU | clear, synthetic | one Arabic voice | - | nothing (default) |
-| **Natural** (Chatterbox Multilingual, MIT) | your servers | natural, human-like | Arabic + English | yes - clone from a 10-30 s recording | NVIDIA GPU (`docker compose --profile neural up`) |
+| **Natural** (Chatterbox Multilingual, MIT - default; or OmniVoice) | your servers | natural, human-like | Arabic + English | yes - clone from a 10-30 s recording | NVIDIA GPU (`docker compose --profile neural up`) or a Mac (`scripts/voice-mac.sh`) |
 | **ElevenLabs** | cloud | most human-like | Arabic + English, very expressive | yes - in your ElevenLabs account | `ELEVENLABS_API_KEY` |
 | **Azure Neural** | cloud | natural | native voice **per dialect** (Saudi, Gulf, Kuwaiti, Qatari, Bahraini, Omani, Iraqi, Levantine, Egyptian, Yemeni, Libyan, Tunisian, Algerian, Moroccan) | - | `AZURE_SPEECH_KEY`, `AZURE_SPEECH_REGION` |
 
+* **Natural voices without an NVIDIA GPU** (the approach VoiceStudio uses): run the voice service natively, outside
+  Docker, so PyTorch can use Apple Silicon's Metal GPU, falling back to the CPU elsewhere:
+
+  ```bash
+  scripts/voice-mac.sh                     # Chatterbox (MIT, fine for commercial use)
+  scripts/voice-mac.sh --model omnivoice   # OmniVoice, VoiceStudio's engine - weights are CC-BY-NC (non-commercial)
+  ```
+
+  Then set `NEURAL_TTS_BASE_URL=http://host.docker.internal:8004` in `.env` and `docker compose up -d api voice-runtime`
+  (`scripts/dev-mac.sh` already points there). Docker Desktop on macOS can't use the Mac's GPU, which is why the
+  service runs natively. The device is picked automatically (`NEURAL_DEVICE=auto`: NVIDIA, then Metal, then CPU).
+  On the CPU, creating voices works but each sentence takes far too long for live calls.
 * **Answer in the caller's dialect** (Azure): the agent detects the caller's dialect and replies with a native voice
   of that dialect - an Egyptian caller hears an Egyptian voice, a Kuwaiti caller a Kuwaiti one.
 * **Your own voices** - the **Voices** page (sidebar): upload a recording, give it any name (Arabic or English), choose

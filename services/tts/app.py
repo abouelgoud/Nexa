@@ -2,9 +2,9 @@
 
 Engines:
 * piper  - fast, CPU friendly, clear but synthetic voices. Arabic text is diacritized (tashkeel) first.
-* neural - Chatterbox Multilingual (MIT, 23 languages incl. Arabic): natural, human-like speech and
-           zero-shot voice cloning from a 10-30 s consented recording. GPU recommended. Enabled when the
-           `chatterbox` package is installed (build with --build-arg NEURAL=true) and TTS_ENGINES includes it.
+* neural - natural, human-like speech and zero-shot voice cloning from a consented recording, with
+           Chatterbox Multilingual (MIT, default) or OmniVoice (NEURAL_MODEL=omnivoice; weights are
+           non-commercial). Runs on an NVIDIA GPU, Apple Silicon (MPS) or CPU; see neural.py.
 
 POST /synthesize {"text", "voice", "language", "speed", "engine"} -> audio/wav
 POST /voices/clone (multipart: voice_id, file)   [neural]
@@ -98,7 +98,10 @@ class SynthesisRequest(BaseModel):
 @app.get("/health")
 def health() -> dict:
     ready = (("piper" not in ENGINES) or bool(_voices)) and (("neural" not in ENGINES) or neural.loaded())
-    return {"status": "ok" if ready else "loading", "engines": ENGINES, "voices": list(_voices)}
+    out = {"status": "ok" if ready else "loading", "engines": ENGINES, "voices": list(_voices)}
+    if "neural" in ENGINES:
+        out["neural"] = neural.info()
+    return out
 
 
 @app.get("/voices")

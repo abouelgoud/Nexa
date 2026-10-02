@@ -36,8 +36,9 @@ async def get_voice(ctx: TenantContext, voice_id: uuid.UUID) -> Voice:
 
 
 ENGINE_DOWN = {
-    "neural": "The Natural (self-hosted) voice engine is not running. Start it with "
-              "\"docker compose --profile neural up -d\" (needs an NVIDIA GPU), or create the voice with ElevenLabs.",
+    "neural": "The Natural (self-hosted) voice engine is not running. On a Mac, start it with scripts/voice-mac.sh; "
+              "on a server with an NVIDIA GPU, with \"docker compose --profile neural up -d\". "
+              "Or create the voice with ElevenLabs.",
     "elevenlabs": "ElevenLabs is not set up. Add ELEVENLABS_API_KEY to .env and restart the API.",
 }
 

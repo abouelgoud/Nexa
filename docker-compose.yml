@@ -4,6 +4,7 @@
 #   docker compose --profile gpu up            # + vLLM serving Qwen3 (NVIDIA GPU)
 #   docker compose --profile cpu-llm up        # + Ollama serving Qwen3 on CPU (slow, for laptops)
 #   docker compose --profile neural up         # + natural self-hosted voices with cloning (NVIDIA GPU)
+#   Mac without NVIDIA: scripts/voice-mac.sh, and NEURAL_TTS_BASE_URL=http://host.docker.internal:8004 in .env
 #   docker compose --profile sip up            # + LiveKit SIP for real phone numbers
 #   docker compose --profile monitoring up     # + Prometheus & Grafana
 #
@@ -74,6 +75,7 @@ services:
     build: { context: ., dockerfile: infrastructure/docker/api.Dockerfile }
     environment: *api-env
     ports: ["${API_PORT:-8000}:8000"]
+    extra_hosts: ["host.docker.internal:host-gateway"]  # reach a voice service running natively (voice-mac.sh)
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -126,6 +128,7 @@ services:
   voice-runtime:
     build: { context: ., dockerfile: infrastructure/docker/voice.Dockerfile }
     environment: *api-env
+    extra_hosts: ["host.docker.internal:host-gateway"]
     depends_on: [livekit, api, stt, tts]
 
   # ---- optional profiles --------------------------------------------------------------------

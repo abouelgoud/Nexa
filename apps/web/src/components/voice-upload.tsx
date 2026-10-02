@@ -41,8 +41,8 @@ export function VoiceUpload({ engines, defaultEngine, onCreated }: {
     <div className="space-y-3">
       {available.length === 0 && (
         <Alert variant="warning">
-          No cloning engine is available. Start the natural voice service (docker compose --profile neural up) or add an
-          ElevenLabs API key on the server.
+          No cloning engine is available. Start the natural voice service (on a Mac: scripts/voice-mac.sh; with an
+          NVIDIA GPU: docker compose --profile neural up) or add an ElevenLabs API key on the server.
         </Alert>
       )}
       <div className="grid gap-3 md:grid-cols-3">
