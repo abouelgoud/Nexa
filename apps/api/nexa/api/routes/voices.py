@@ -19,7 +19,7 @@ from nexa.models import Voice
 from nexa.providers.registry import TTS_PROVIDERS, get_tts, tts_configured
 from nexa.providers.tts.base import TTSError
 from nexa.services.audit import audit
-from nexa.services.voice_library import agents_using, create_voice, delete_voice, get_voice
+from nexa.services.voice_library import agents_using, create_voice, delete_voice, engine_available, get_voice
 from nexa.services.voices import PIPER_DEFAULTS, azure_catalog
 
 router = APIRouter(prefix="/voices", tags=["voices"])
@@ -67,7 +67,7 @@ async def _library(ctx: TenantContext) -> list[Voice]:
 async def list_voices(ctx: TenantContext = Depends(get_tenant_context)) -> dict[str, Any]:
     voices = await _library(ctx)
     return {"voices": [_voice_out(v, await agents_using(ctx, v)) for v in voices],
-            "engines": [{"key": k, "label": PROVIDERS[k]["label"], "available": tts_configured(k)}
+            "engines": [{"key": k, "label": PROVIDERS[k]["label"], "available": await engine_available(k)}
                         for k in ("neural", "elevenlabs")]}
 
 

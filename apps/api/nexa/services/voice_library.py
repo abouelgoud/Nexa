@@ -35,6 +35,21 @@ async def get_voice(ctx: TenantContext, voice_id: uuid.UUID) -> Voice:
     return voice
 
 
+ENGINE_DOWN = {
+    "neural": "The Natural (self-hosted) voice engine is not running. Start it with "
+              "\"docker compose --profile neural up -d\" (needs an NVIDIA GPU), or create the voice with ElevenLabs.",
+    "elevenlabs": "ElevenLabs is not set up. Add ELEVENLABS_API_KEY to .env and restart the API.",
+}
+
+
+async def engine_available(provider: str) -> bool:
+    """Whether a cloning engine can be used right now (the self-hosted one must actually be running)."""
+    tts = get_tts(provider) if tts_configured(provider) else None
+    if tts is None:
+        return False
+    return await tts.health() if provider == "neural" else True
+
+
 async def create_voice(ctx: TenantContext, *, name: str, provider: str, audio: bytes, filename: str, mime: str) -> Voice:
     name = name.strip()
     if not name:
@@ -49,8 +64,8 @@ async def create_voice(ctx: TenantContext, *, name: str, provider: str, audio: b
                                                Voice.deleted_at.is_(None))):
         raise Conflict(f'You already have a voice named "{name}".')
     tts = get_tts(provider) if tts_configured(provider) else None
-    if tts is None:
-        raise ServiceUnavailable("This voice engine is not available on the server.")
+    if tts is None or (provider == "neural" and not await tts.health()):
+        raise ServiceUnavailable(ENGINE_DOWN.get(provider, "This voice engine is not available on the server."))
     seconds = None
     try:
         if provider == "neural":

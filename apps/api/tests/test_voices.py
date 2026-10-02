@@ -295,6 +295,30 @@ async def test_elevenlabs_cloning(account, monkeypatch):
     assert [v["id"] for v in voices] == ["EL_NEW", "EL_STOCK"] and voices[0]["name"] == "Noura (your voice)"
 
 
+async def test_upload_when_neural_service_is_not_running(account):
+    def unreachable(req: httpx.Request):
+        raise httpx.ConnectError("[Errno -2] Name or service not known", request=req)  # no --profile neural
+
+    registry.override("tts:neural", NeuralHTTPTTS("http://tts-neural:8002", transport=httpx.MockTransport(unreachable)))
+    listing = (await account.get("/voices")).json()
+    assert {e["key"]: e["available"] for e in listing["engines"]}["neural"] is False
+    r = await upload(account, "Noura")
+    assert r.status_code == 503 and "--profile neural" in r.json()["error"]["message"]
+    assert (await account.get("/voices")).json()["voices"] == []
+
+
+async def test_upload_when_neural_service_drops_during_cloning(account):
+    def handler(req: httpx.Request):
+        if req.url.path == "/health":
+            return httpx.Response(200, json={"engines": ["piper", "neural"]})
+        raise httpx.ConnectError("connection reset", request=req)
+
+    registry.override("tts:neural", NeuralHTTPTTS("http://tts-neural:8002", transport=httpx.MockTransport(handler)))
+    r = await upload(account, "Noura")
+    assert r.status_code == 503 and "could not be created" in r.json()["error"]["message"]
+    assert (await account.get("/voices")).json()["voices"] == []
+
+
 async def test_neural_voice_restored_from_saved_recording(account):
     registry.override("tts:neural", FakeNeural())
     voice = (await upload(account, "Noura")).json()

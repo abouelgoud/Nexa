@@ -43,8 +43,12 @@ class NeuralHTTPTTS(TTSProvider):
                                latency_ms=(time.perf_counter() - start) * 1000, characters=len(text))
 
     async def clone(self, voice_id: str, audio: bytes, filename: str) -> dict:
-        r = await self._client.post(f"{self.base_url}/voices/clone", data={"voice_id": voice_id},
-                                    files={"file": (filename, audio)})
+        try:
+            # Cloning analyses the whole recording, which takes a while without a GPU.
+            r = await self._client.post(f"{self.base_url}/voices/clone", data={"voice_id": voice_id},
+                                        files={"file": (filename, audio)}, timeout=300)
+        except httpx.HTTPError as exc:
+            raise TTSError(f"Neural voice service unreachable: {exc}") from exc
         if r.status_code >= 400:
             raise TTSError(f"Voice cloning failed: {r.text[:200]}")
         return r.json()

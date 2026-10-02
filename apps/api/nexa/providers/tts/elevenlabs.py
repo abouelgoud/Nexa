@@ -52,9 +52,12 @@ class ElevenLabsTTS(TTSProvider):
 
     async def add_voice(self, name: str, audio: bytes, filename: str) -> str:
         """Instant voice clone in the ElevenLabs account; returns the new voice_id."""
-        r = await self._client.post(f"{self.base_url}/v1/voices/add",
-                                    data={"name": name, "remove_background_noise": "true"},
-                                    files={"files": (filename, audio)})
+        try:
+            r = await self._client.post(f"{self.base_url}/v1/voices/add",
+                                        data={"name": name, "remove_background_noise": "true"},
+                                        files={"files": (filename, audio)}, timeout=120)
+        except httpx.HTTPError as exc:
+            raise TTSError(f"ElevenLabs unreachable: {exc}") from exc
         if r.status_code >= 400:
             raise TTSError(f"ElevenLabs voice cloning failed ({r.status_code}): {r.text[:200]}")
         return r.json()["voice_id"]
