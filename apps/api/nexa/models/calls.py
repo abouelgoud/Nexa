@@ -6,7 +6,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from nexa.models.base import utcnow, Base, TenantScoped, Timestamps, UUIDPk
+from nexa.models.base import Base, TenantScoped, Timestamps, UUIDPk, utcnow
 
 
 class Call(UUIDPk, Timestamps, TenantScoped, Base):

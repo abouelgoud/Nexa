@@ -11,6 +11,7 @@ import { ErrorBox } from "@/components/error-box";
 import { RealtimeTest } from "@/components/realtime-test";
 import { api, post } from "@/lib/api";
 import { dialectName } from "@/lib/format";
+import { toWav16k } from "@/lib/wav";
 
 type Line = { role: "agent" | "caller"; text: string };
 
@@ -141,9 +142,11 @@ export default function TestPage() {
       rec.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop());
         if (!session) return;
-        const blob = new Blob(chunks.current, { type: rec.mimeType || "audio/webm" });
+        const recorded = new Blob(chunks.current, { type: rec.mimeType || "audio/webm" });
+        const wav = await toWav16k(recorded).catch(() => null);
         const form = new FormData();
-        form.append("file", blob, "speech.webm");
+        if (wav) form.append("file", wav, "speech.wav");
+        else form.append("file", recorded, "speech.webm");
         form.append("voice", String(voice));
         setBusy(true);
         try {

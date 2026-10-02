@@ -6,7 +6,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from nexa.models.base import utcnow, Base, TenantScoped, UUIDPk
+from nexa.models.base import Base, TenantScoped, UUIDPk, utcnow
 
 
 class AuditLog(UUIDPk, TenantScoped, Base):

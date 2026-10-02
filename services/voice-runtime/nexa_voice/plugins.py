@@ -30,10 +30,11 @@ def frames_to_wav(buffer: utils.AudioBuffer) -> bytes:
 class NexaSTT(stt.STT):
     """Non-streaming STT; AgentSession pairs it with VAD to segment caller utterances."""
 
-    def __init__(self, provider: STTProvider, prompt: str | None = None):
+    def __init__(self, provider: STTProvider, prompt: str | None = None, keywords: list[str] | None = None):
         super().__init__(capabilities=stt.STTCapabilities(streaming=False, interim_results=False))
         self._provider = provider
         self._prompt = prompt
+        self._keywords = keywords or []
         self.last_language: str | None = None
 
     async def _recognize_impl(self, buffer: utils.AudioBuffer, *, language: NotGivenOr[str] = NOT_GIVEN,
@@ -41,7 +42,8 @@ class NexaSTT(stt.STT):
         start = time.perf_counter()
         try:
             result = await self._provider.transcribe(frames_to_wav(buffer), mime_type="audio/wav",
-                                                     language=language or None, prompt=self._prompt)
+                                                     language=language or None, prompt=self._prompt,
+                                                     keywords=self._keywords)
         except STTError as exc:
             raise APIConnectionError(str(exc)) from exc
         STT_LATENCY.observe(time.perf_counter() - start)

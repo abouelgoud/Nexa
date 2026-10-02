@@ -39,12 +39,21 @@ class Settings(BaseSettings):
     # Qwen3 reasoning models emit <think> blocks; disable for voice latency.
     llm_disable_thinking: bool = True
 
-    stt_provider: Literal["whisper", "openai_compatible", "none"] = "whisper"
+    stt_provider: Literal["whisper", "openai_compatible", "elevenlabs", "azure", "none"] = "whisper"
     stt_base_url: str = "http://stt:8001/v1"
     stt_model: str = "large-v3"
 
     tts_provider: Literal["piper", "none"] = "piper"
     tts_base_url: str = "http://tts:8002"
+    # Self-hosted natural voices with cloning (services/tts built with the neural engine, GPU recommended).
+    neural_tts_base_url: str = "http://tts-neural:8002"
+
+    # Cloud speech (optional). Keys stay on the server; never sent to the browser or the LLM.
+    elevenlabs_api_key: str | None = None
+    elevenlabs_tts_model: str = "eleven_multilingual_v2"
+    elevenlabs_stt_model: str = "scribe_v2"
+    azure_speech_key: str | None = None
+    azure_speech_region: str = "uaenorth"
 
     embedding_provider: Literal["hashing", "openai_compatible"] = "hashing"
     embedding_base_url: str = "http://embeddings:8003/v1"

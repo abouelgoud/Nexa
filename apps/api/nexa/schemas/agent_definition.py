@@ -73,13 +73,22 @@ class LanguageBehavior(Strict):
     code_switching: bool = True
     # Dialect the agent itself speaks when replying in Arabic.
     response_dialect: ArabicDialect | Literal["match_caller"] = "match_caller"
+    # Words callers are likely to say (names, specialties, products) to improve speech recognition accuracy.
+    vocabulary: list[str] = Field(default_factory=list, max_length=200)
 
 
 class VoiceConfig(Strict):
-    provider: str = "local"
+    # local/piper: fast offline voices · neural: self-hosted natural voices with cloning (Chatterbox)
+    # elevenlabs / azure: cloud voices (most natural; Azure has native voices per Arabic dialect)
+    provider: Literal["local", "piper", "neural", "elevenlabs", "azure"] = "local"
     voice_id: str = "default-ar"
     english_voice_id: str | None = "default-en"
     speed: float = Field(1.0, ge=0.5, le=2.0)
+    # Azure: speak with a native voice of the caller's detected dialect (Saudi, Egyptian, Gulf, ...).
+    match_caller_dialect: bool = False
+    gender: Literal["female", "male"] = "male"
+    # Short spoken acknowledgement ("لحظة من فضلك") when an answer takes a moment, like a person would.
+    thinking_fillers: bool = True
 
 
 class Personality(Strict):

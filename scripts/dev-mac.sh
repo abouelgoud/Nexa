@@ -155,6 +155,7 @@ export SIP_PROVIDER=none
 export LLM_BASE_URL="${LLM_BASE_URL:-http://localhost:8010/v1}"
 export STT_BASE_URL="${STT_BASE_URL:-http://localhost:8001/v1}"
 export TTS_BASE_URL="${TTS_BASE_URL:-http://localhost:8002}"
+export NEURAL_TTS_BASE_URL="${NEURAL_TTS_BASE_URL:-http://localhost:8004}"
 export CORS_ORIGINS="[\"http://localhost:$WEB_PORT\"]"
 export API_INTERNAL_URL="http://localhost:$API_PORT"
 unset NEXT_PUBLIC_API_URL || true

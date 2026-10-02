@@ -19,16 +19,23 @@ from nexa.runtime.session import ConversationRuntime, TurnResult
 log = logging.getLogger("nexa.voice")
 
 
+FILLERS = {"ar": "لحظة من فضلك.", "en": "One moment, please."}
+FILLER_AFTER_SECONDS = 0.9
+
+
 @dataclass
 class CallHandle:
     call_id: UUID
     tenant_id: UUID
     pending_actions: list[dict[str, Any]] = field(default_factory=list)
     language: str = "ar"
+    dialect: str | None = None
+    thinking_fillers: bool = True
 
 
 class NexaVoiceAgent(Agent):
     def __init__(self, handle: CallHandle, tts_for_language=None):
+        """``tts_for_language(language, dialect)`` re-targets the voice when the caller's language/dialect changes."""
         # Instructions are unused: replies come from the Nexa runtime, never from a free-running model.
         super().__init__(instructions="Nexa runtime-driven agent")
         self.handle = handle
@@ -46,9 +53,11 @@ class NexaVoiceAgent(Agent):
         self.handle.pending_actions.extend(a for a in result.actions if a.get("type") in ("transfer", "end_call"))
         if result.ended and not any(a.get("type") == "end_call" for a in self.handle.pending_actions):
             self.handle.pending_actions.append({"type": "end_call"})
-        if result.language and result.language != self.handle.language and self._tts_for_language:
-            self.handle.language = result.language
-            self._tts_for_language(result.language)
+        language = result.language or self.handle.language
+        if (language, result.dialect) != (self.handle.language, self.handle.dialect):
+            self.handle.language, self.handle.dialect = language, result.dialect
+            if self._tts_for_language:
+                self._tts_for_language(language, result.dialect)
         return result
 
     async def llm_node(self, chat_ctx: llm.ChatContext, tools: list, model_settings: ModelSettings) -> AsyncIterable[str]:
@@ -59,8 +68,14 @@ class NexaVoiceAgent(Agent):
                 break
         if not user_text.strip():
             return
+        turn = asyncio.ensure_future(self.run_turn(user_text))
+        if self.handle.thinking_fillers:
+            # A person says "one moment" while checking the system instead of going silent.
+            done, _ = await asyncio.wait({turn}, timeout=FILLER_AFTER_SECONDS)
+            if not done:
+                yield FILLERS.get(self.handle.language, FILLERS["ar"]) + " "
         try:
-            result = await self.run_turn(user_text)
+            result = await turn
         except Exception:
             log.exception("turn failed")
             yield "عذراً، حدث خلل. لحظة من فضلك." if self.handle.language == "ar" else "Sorry, something went wrong."

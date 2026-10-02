@@ -32,8 +32,10 @@ class STTProvider(ABC):
 
     @abstractmethod
     async def transcribe(
-        self, audio: bytes, *, mime_type: str = "audio/wav", language: str | None = None, prompt: str | None = None
-    ) -> TranscriptionResult: ...
+        self, audio: bytes, *, mime_type: str = "audio/wav", language: str | None = None, prompt: str | None = None,
+        keywords: list[str] | None = None,
+    ) -> TranscriptionResult:
+        """``keywords``: words the caller is likely to say (names, specialties) to bias recognition."""
 
     async def stream(self, chunks: AsyncIterator[bytes], *, language: str | None = None) -> AsyncIterator[TranscriptionResult]:
         """Default streaming: buffer and transcribe once. Real-time runtimes use VAD-segmented utterances."""

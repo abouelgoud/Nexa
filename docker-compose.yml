@@ -3,6 +3,7 @@
 #   docker compose up                          # platform + local STT/TTS + LiveKit (no GPU needed)
 #   docker compose --profile gpu up            # + vLLM serving Qwen3 (NVIDIA GPU)
 #   docker compose --profile cpu-llm up        # + Ollama serving Qwen3 on CPU (slow, for laptops)
+#   docker compose --profile neural up         # + natural self-hosted voices with cloning (NVIDIA GPU)
 #   docker compose --profile sip up            # + LiveKit SIP for real phone numbers
 #   docker compose --profile monitoring up     # + Prometheus & Grafana
 #
@@ -24,6 +25,12 @@ x-api-env: &api-env
   STT_BASE_URL: ${STT_BASE_URL:-http://stt:8001/v1}
   TTS_PROVIDER: ${TTS_PROVIDER:-piper}
   TTS_BASE_URL: ${TTS_BASE_URL:-http://tts:8002}
+  NEURAL_TTS_BASE_URL: ${NEURAL_TTS_BASE_URL:-http://tts-neural:8002}
+  ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+  ELEVENLABS_TTS_MODEL: ${ELEVENLABS_TTS_MODEL:-eleven_multilingual_v2}
+  ELEVENLABS_STT_MODEL: ${ELEVENLABS_STT_MODEL:-scribe_v2}
+  AZURE_SPEECH_KEY: ${AZURE_SPEECH_KEY:-}
+  AZURE_SPEECH_REGION: ${AZURE_SPEECH_REGION:-uaenorth}
   EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-hashing}
   EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-http://embeddings:8003/v1}
   EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-m3}
@@ -137,6 +144,23 @@ services:
     volumes: [hf-cache:/root/.cache/huggingface]
     ports: ["8010:8000"]
     ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices: [{ driver: nvidia, count: all, capabilities: [gpu] }]
+
+  tts-neural:
+    profiles: ["neural"]
+    build:
+      context: services/tts
+      args:
+        NEURAL: "true"
+        BASE: pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime
+    environment:
+      TTS_ENGINES: neural
+      NEURAL_DEVICE: cuda
+    volumes: [models:/models]
+    ports: ["8004:8002"]
     deploy:
       resources:
         reservations:

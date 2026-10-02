@@ -44,8 +44,9 @@ class FakeSTT(STTProvider):
     def __init__(self):
         self.received = b""
 
-    async def transcribe(self, audio, *, mime_type="audio/wav", language=None, prompt=None):
+    async def transcribe(self, audio, *, mime_type="audio/wav", language=None, prompt=None, keywords=None):
         self.received = audio
+        self.keywords = keywords
         return TranscriptionResult(text="أبغى أحجز موعد", language="ar", duration_seconds=0.5)
 
 
@@ -62,7 +63,8 @@ def test_frames_to_wav():
 
 async def test_stt_adapter():
     provider = FakeSTT()
-    event = await NexaSTT(provider).recognize([tone_frame()])
+    event = await NexaSTT(provider, keywords=["سارة العتيبي"]).recognize([tone_frame()])
+    assert provider.keywords == ["سارة العتيبي"]
     assert event.alternatives[0].text == "أبغى أحجز موعد"
     assert event.alternatives[0].language == "ar"
     assert provider.received.startswith(b"RIFF")
@@ -104,3 +106,39 @@ async def test_voice_agent_llm_node_streams_replies(account, clinic_db):
     ctx.add_message(role="user", content="I want to book a dentist appointment")
     out = "".join([chunk async for chunk in agent.llm_node(ctx, [], None)])
     assert "Do you prefer a specific doctor?" in out
+
+
+async def test_filler_spoken_when_answer_is_slow(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+    from uuid import uuid4
+
+    import nexa_voice.agent as agent_mod
+    from livekit.agents import llm
+
+    monkeypatch.setattr(agent_mod, "FILLER_AFTER_SECONDS", 0.05)
+    agent = NexaVoiceAgent(CallHandle(call_id=uuid4(), tenant_id=uuid4(), language="ar"))
+
+    async def slow_turn(text, stt_meta=None):
+        await asyncio.sleep(0.2)
+        return SimpleNamespace(replies=["عندي موعد يوم الأحد."])
+
+    agent.run_turn = slow_turn
+    ctx = llm.ChatContext()
+    ctx.add_message(role="user", content="أبغى موعد")
+    chunks = [c async for c in agent.llm_node(ctx, [], None)]
+    assert chunks[0].strip() == "لحظة من فضلك." and "عندي موعد" in chunks[-1]
+
+    agent.handle.thinking_fillers = False
+    chunks = [c async for c in agent.llm_node(ctx, [], None)]
+    assert len(chunks) == 1
+
+
+async def test_voice_follows_caller_dialect(account, clinic_db):
+    setup = await setup_doctor_agent(account)
+    session = (await account.post("/test/sessions", {"agent_id": setup["agent"]["id"]})).json()
+    switches = []
+    agent = NexaVoiceAgent(CallHandle(call_id=UUID(session["session_id"]), tenant_id=UUID(account.tenant_id)),
+                           tts_for_language=lambda lang, dialect: switches.append((lang, dialect)))
+    await agent.run_turn("عايز احجز معاد دلوقتي")
+    assert switches[-1] == ("ar", "eg")

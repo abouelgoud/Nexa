@@ -1,6 +1,15 @@
 """ORM models. Importing this package registers every table on Base.metadata."""
 
-from nexa.models.agents import Agent, AgentLanguage, AgentRule, AgentVersion, AgentVoice, Workflow, WorkflowEdge, WorkflowNode
+from nexa.models.agents import (
+    Agent,
+    AgentLanguage,
+    AgentRule,
+    AgentVersion,
+    AgentVoice,
+    Workflow,
+    WorkflowEdge,
+    WorkflowNode,
+)
 from nexa.models.base import Base, TenantScoped
 from nexa.models.calls import (
     Call,

@@ -75,6 +75,7 @@ adapters (vLLM/Qwen3 tool calling, Whisper, Piper) and the real-time voice runti
 * [Architecture](docs/architecture.md) - components, tenancy, versioning, tools, workflow engine, runtime
 * [Milestones & status](docs/milestones.md) - what is implemented and verified, what is next
 * [Telephony](docs/telephony.md) - WebRTC testing, SIP numbers, transfers
+* [Natural voices & recognition accuracy](docs/voice-quality.md)
 * [Security](docs/security.md)
 * [LLM server](services/llm-server/README.md), [voice runtime](services/voice-runtime/README.md)
 

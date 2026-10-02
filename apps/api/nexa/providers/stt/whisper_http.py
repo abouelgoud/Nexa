@@ -22,7 +22,8 @@ class WhisperHTTPSTT(STTProvider):
         self.model = model
         self._client = httpx.AsyncClient(timeout=timeout, transport=transport)
 
-    async def transcribe(self, audio, *, mime_type="audio/wav", language=None, prompt=None) -> TranscriptionResult:
+    async def transcribe(self, audio, *, mime_type="audio/wav", language=None, prompt=None,
+                         keywords=None) -> TranscriptionResult:
         ext = {"audio/webm": "webm", "audio/ogg": "ogg", "audio/mpeg": "mp3", "audio/mp4": "m4a"}.get(
             mime_type.split(";")[0], "wav")
         data = {"model": self.model, "response_format": "verbose_json"}
@@ -30,6 +31,9 @@ class WhisperHTTPSTT(STTProvider):
             data["language"] = language
         if prompt:
             data["prompt"] = prompt
+        if keywords:
+            # faster-whisper "hotwords": biases decoding toward these words (names, specialties, ...)
+            data["hotwords"] = " ".join(k.strip() for k in keywords if k.strip())[:800]
         start = time.perf_counter()
         try:
             r = await self._client.post(f"{self.base_url}/audio/transcriptions", data=data,

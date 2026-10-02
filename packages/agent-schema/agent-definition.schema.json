@@ -178,6 +178,14 @@
           ],
           "default": "match_caller",
           "title": "Response Dialect"
+        },
+        "vocabulary": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 200,
+          "title": "Vocabulary",
+          "type": "array"
         }
       },
       "title": "LanguageBehavior",
@@ -350,6 +358,13 @@
       "properties": {
         "provider": {
           "default": "local",
+          "enum": [
+            "local",
+            "piper",
+            "neural",
+            "elevenlabs",
+            "azure"
+          ],
           "title": "Provider",
           "type": "string"
         },
@@ -376,6 +391,25 @@
           "minimum": 0.5,
           "title": "Speed",
           "type": "number"
+        },
+        "match_caller_dialect": {
+          "default": false,
+          "title": "Match Caller Dialect",
+          "type": "boolean"
+        },
+        "gender": {
+          "default": "male",
+          "enum": [
+            "female",
+            "male"
+          ],
+          "title": "Gender",
+          "type": "string"
+        },
+        "thinking_fillers": {
+          "default": true,
+          "title": "Thinking Fillers",
+          "type": "boolean"
         }
       },
       "title": "VoiceConfig",

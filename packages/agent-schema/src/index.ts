@@ -44,13 +44,19 @@ export const languageBehaviorSchema = z.strictObject({
   primary_language: z.enum(LANGUAGES).default("ar"),
   code_switching: z.boolean().default(true),
   response_dialect: z.union([z.enum(ARABIC_DIALECTS), z.literal("match_caller")]).default("match_caller"),
+  vocabulary: z.array(z.string()).max(200).default([]),
 });
 
+export const VOICE_PROVIDERS = ["local", "piper", "neural", "elevenlabs", "azure"] as const;
+
 export const voiceSchema = z.strictObject({
-  provider: z.string().default("local"),
+  provider: z.enum(VOICE_PROVIDERS).default("local"),
   voice_id: z.string().min(1, "Choose a voice").default("default-ar"),
   english_voice_id: z.string().nullable().default("default-en"),
   speed: z.number().min(0.5).max(2).default(1),
+  match_caller_dialect: z.boolean().default(false),
+  gender: z.enum(["female", "male"]).default("male"),
+  thinking_fillers: z.boolean().default(true),
 });
 
 export const personalitySchema = z.strictObject({

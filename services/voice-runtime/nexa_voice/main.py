@@ -18,6 +18,7 @@ from nexa.providers.registry import get_sip, get_stt, get_tts
 from nexa.runtime.session import ConversationRuntime
 from nexa.schemas.agent_definition import AgentDefinition
 from nexa.services.telephony import resolve_inbound
+from nexa.services.voices import resolve_voice, stt_keywords
 from nexa_voice.agent import CallHandle, NexaVoiceAgent
 from nexa_voice.plugins import NexaSTT, NexaTTS, RuntimeLLM
 
@@ -67,16 +68,19 @@ async def entrypoint(ctx: JobContext) -> None:
         ctx.shutdown("no route")
         return
     opening, defn = started
-    handle = CallHandle(call_id=call_id, tenant_id=tenant_id, language=defn.language_behavior.primary_language)
-    stt_provider, tts_provider = get_stt(), get_tts()
-    voice_tts = NexaTTS(tts_provider, defn.voice.voice_id, handle.language, defn.voice.speed)
+    handle = CallHandle(call_id=call_id, tenant_id=tenant_id, language=defn.language_behavior.primary_language,
+                        thinking_fillers=defn.voice.thinking_fillers)
+    provider, voice_id = resolve_voice(defn, handle.language, None)
+    tts_provider = get_tts(provider) or get_tts()
+    voice_tts = NexaTTS(tts_provider, voice_id, handle.language, defn.voice.speed)
 
-    def switch_voice(language: str) -> None:
+    def switch_voice(language: str, dialect: str | None) -> None:
         voice_tts.language = language
-        voice_tts.voice_id = defn.voice.english_voice_id if language == "en" and defn.voice.english_voice_id else defn.voice.voice_id
+        voice_tts.voice_id = resolve_voice(defn, language, dialect)[1]
 
     agent = NexaVoiceAgent(handle, tts_for_language=switch_voice)
-    session = AgentSession(stt=NexaSTT(stt_provider, prompt="مكالمة هاتفية. Phone call in Arabic and English."),
+    session = AgentSession(stt=NexaSTT(get_stt(), prompt="مكالمة هاتفية. Phone call in Arabic and English.",
+                                       keywords=stt_keywords(defn)),
                            llm=RuntimeLLM(), tts=voice_tts, vad=ctx.proc.userdata["vad"], allow_interruptions=True,
                            min_endpointing_delay=0.4, max_endpointing_delay=2.5)
 

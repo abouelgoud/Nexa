@@ -14,7 +14,7 @@ import time
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from faster_whisper import WhisperModel
 
-MODEL = os.getenv("WHISPER_MODEL", "large-v3")
+MODEL = os.getenv("WHISPER_MODEL", "large-v3")  # most accurate for Arabic; large-v3-turbo is ~3x faster
 DEVICE = os.getenv("WHISPER_DEVICE", "auto")
 COMPUTE = os.getenv("WHISPER_COMPUTE_TYPE", "default")
 BEAM = int(os.getenv("WHISPER_BEAM_SIZE", "5"))
@@ -50,7 +50,7 @@ def health() -> dict:
 @app.post("/v1/audio/transcriptions")
 async def transcribe(file: UploadFile = File(...), model_name: str | None = Form(None, alias="model"),
                      language: str | None = Form(None), prompt: str | None = Form(None),
-                     response_format: str = Form("json")) -> dict:
+                     hotwords: str | None = Form(None), response_format: str = Form("json")) -> dict:
     audio = await file.read()
     if not audio:
         raise HTTPException(400, "empty audio")
@@ -59,6 +59,9 @@ async def transcribe(file: UploadFile = File(...), model_name: str | None = Form
         segments, info = model().transcribe(
             io.BytesIO(audio), language=language or None, beam_size=BEAM, vad_filter=True,
             initial_prompt=prompt or DEFAULT_PROMPT, condition_on_previous_text=False,
+            # Words the caller is likely to say (doctor names, specialties) - improves accuracy on names.
+            hotwords=hotwords or None,
+            vad_parameters={"min_silence_duration_ms": 300},
         )
         segs = list(segments)
     except Exception as exc:  # noqa: BLE001 - decoding errors from PyAV/ctranslate2

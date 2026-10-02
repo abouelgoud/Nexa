@@ -17,13 +17,11 @@ import { useEffect, useState } from "react";
 import { Controller, useFieldArray, useForm, type Control } from "react-hook-form";
 
 import { ErrorBox } from "@/components/error-box";
-import { get, post } from "@/lib/api";
+import { api, get, post } from "@/lib/api";
 import { formatDate } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
 import { useAgent, useChecklist, useSaveAgentConfig, useVersions } from "@/lib/queries";
 
-const AR_VOICES = ["ar_JO-kareem-medium", "ar_JO-kareem-low"];
-const EN_VOICES = ["en_US-amy-medium", "en_US-lessac-medium", "en_GB-alba-medium"];
 const CAPABILITY_LABELS: Record<string, string> = {
   answer_questions: "Answer questions from your knowledge", book_appointment: "Book appointments",
   cancel_appointment: "Cancel appointments", reschedule_appointment: "Reschedule appointments",
@@ -150,6 +148,13 @@ function LanguageSection({ form }: { form: Form }) {
           </Select>
         </Field>
       </div>
+      <Controller control={control} name="language_behavior.vocabulary" render={({ field }) => (
+        <Field label="Words callers will say" hint="Names, specialties, products, neighbourhoods - one per line. Greatly improves recognition of names.">
+          <Textarea dir="auto" rows={3} placeholder={"د. سارة العتيبي\nالجلدية\nDermatology"}
+            value={(field.value ?? []).join("\n")}
+            onChange={(e) => field.onChange(e.target.value.split("\n").map((w) => w.trim()).filter(Boolean))} />
+        </Field>
+      )} />
       <SwitchField control={control} name="language_behavior.code_switching" label="Understand Arabic-English mixing"
         hint={'e.g. "أبغى أحجز appointment" or "ممكن check لي الطلب؟"'} />
       {languages.includes("ar") && (
@@ -164,21 +169,134 @@ function LanguageSection({ form }: { form: Form }) {
   );
 }
 
-function VoiceSection({ form }: { form: Form }) {
-  const { register } = form;
+type VoiceProvider = { key: string; label: string; kind: string; cloning: boolean; note: string; configured: boolean;
+  voices: { id: string; name: string; dialect?: string | null; gender?: string }[] };
+
+function playBase64(clip: { mime_type: string; audio_base64: string }) {
+  void new Audio(`data:${clip.mime_type};base64,${clip.audio_base64}`).play();
+}
+
+function CloneVoice({ onCloned }: { onCloned: (id: string) => void }) {
+  const [name, setName] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [consent, setConsent] = useState(false);
+  const clone = useMutation({
+    mutationFn: () => {
+      const form = new FormData();
+      form.append("name", name);
+      form.append("consent", String(consent));
+      form.append("file", file as File);
+      return api<{ id: string }>("/voices/clone", { method: "POST", form });
+    },
+    onSuccess: (v) => onCloned(v.id),
+  });
   return (
-    <Section title="Voice" description="Local Piper voices by default. More providers can be added later.">
-      <div className="grid gap-4 md:grid-cols-3">
-        <Field label="Arabic voice">
-          <Input list="ar-voices" {...register("voice.voice_id")} />
-          <datalist id="ar-voices">{AR_VOICES.map((v) => <option key={v} value={v} />)}</datalist>
-        </Field>
-        <Field label="English voice">
-          <Input list="en-voices" {...register("voice.english_voice_id")} />
-          <datalist id="en-voices">{EN_VOICES.map((v) => <option key={v} value={v} />)}</datalist>
-        </Field>
-        <Field label="Speaking speed"><Input type="number" step="0.1" min="0.5" max="2" {...register("voice.speed", { valueAsNumber: true })} /></Field>
+    <div className="space-y-2 rounded-lg border border-dashed p-3">
+      <div className="text-sm font-medium">Create your own voice</div>
+      <p className="text-xs text-muted-foreground">Upload 10-30 seconds of one person speaking clearly (e.g. your receptionist). The agent will speak in that voice.</p>
+      <div className="grid gap-2 md:grid-cols-2">
+        <Input placeholder="Voice name (e.g. Sara reception)" value={name} onChange={(e) => setName(e.target.value)} />
+        <Input type="file" accept="audio/*" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
       </div>
+      <label className="flex items-start gap-2 text-xs">
+        <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} className="mt-0.5" />
+        I have the speaker&apos;s permission to create and use a voice from this recording.
+      </label>
+      <ErrorBox error={clone.error} />
+      {clone.isSuccess && <Alert variant="success">Voice created and selected.</Alert>}
+      <Button type="button" size="sm" variant="outline" disabled={!name || !file || !consent || clone.isPending} onClick={() => clone.mutate()}>
+        {clone.isPending ? "Creating…" : "Create voice"}
+      </Button>
+    </div>
+  );
+}
+
+function VoiceSection({ form }: { form: Form }) {
+  const { register, control, watch, setValue } = form;
+  const qc = useQueryClient();
+  const catalog = useQuery({ queryKey: ["voice-catalog"], queryFn: () => get<{ providers: VoiceProvider[] }>("/voices/catalog") });
+  const providerKey = watch("voice.provider") === "piper" ? "local" : watch("voice.provider") ?? "local";
+  const provider = catalog.data?.providers.find((p) => p.key === providerKey);
+  const voices = provider?.voices ?? [];
+  const arabicVoices = providerKey === "azure" ? voices.filter((v) => v.dialect) : voices;
+  const englishVoices = providerKey === "azure" ? voices.filter((v) => !v.dialect) : voices;
+  const preview = useMutation({
+    mutationFn: (language: "ar" | "en") => post<{ mime_type: string; audio_base64: string }>("/voices/preview", {
+      provider: providerKey, language, speed: watch("voice.speed") ?? 1,
+      voice_id: (language === "en" && watch("voice.english_voice_id")) || watch("voice.voice_id") }),
+    onSuccess: playBase64,
+  });
+  const choose = (key: string) => {
+    setValue("voice.provider", key as never, { shouldDirty: true });
+    const first = catalog.data?.providers.find((p) => p.key === key)?.voices;
+    if (key === "azure") {
+      setValue("voice.voice_id", "ar-SA-HamedNeural", { shouldDirty: true });
+      setValue("voice.english_voice_id", "en-US-AndrewMultilingualNeural", { shouldDirty: true });
+    } else if (first?.length) {
+      setValue("voice.voice_id", first[0].id, { shouldDirty: true });
+      setValue("voice.english_voice_id", key === "local" ? first[first.length - 1].id : null, { shouldDirty: true });
+    }
+  };
+  const voiceSelect = (field: "voice.voice_id" | "voice.english_voice_id", list: VoiceProvider["voices"]) =>
+    list.length > 0 ? (
+      <Select value={watch(field) ?? ""} onChange={(e) => setValue(field, e.target.value, { shouldDirty: true })}>
+        {!list.some((v) => v.id === watch(field)) && watch(field) && <option value={watch(field) ?? ""}>{watch(field)}</option>}
+        {list.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+      </Select>
+    ) : <Input {...register(field)} placeholder="Voice ID" />;
+
+  return (
+    <Section title="Voice" description="How your agent sounds. Natural voices sound like a real person; you can also use your own voice.">
+      <div className="grid gap-3 md:grid-cols-2">
+        {catalog.data?.providers.map((p) => (
+          <button key={p.key} type="button" onClick={() => choose(p.key)}
+            className={`rounded-lg border p-3 text-start transition ${providerKey === p.key ? "border-primary ring-2 ring-primary/30" : "hover:bg-accent"}`}>
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-medium">{p.label}</span>
+              <Badge variant={p.configured ? "success" : "outline"}>{p.configured ? "available" : "not set up"}</Badge>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">{p.note}</p>
+          </button>
+        ))}
+      </div>
+      {provider && !provider.configured && (
+        <Alert variant="warning">
+          {providerKey === "elevenlabs" ? "Add ELEVENLABS_API_KEY on the server to use ElevenLabs voices."
+            : providerKey === "azure" ? "Add AZURE_SPEECH_KEY and AZURE_SPEECH_REGION on the server to use Azure voices."
+              : providerKey === "neural" ? "Start the natural voice service (docker compose --profile neural up) to use these voices."
+                : "The voice service is not running."}
+        </Alert>
+      )}
+      <div className="grid gap-4 md:grid-cols-3">
+        <Field label="Arabic voice">{voiceSelect("voice.voice_id", arabicVoices)}</Field>
+        <Field label="English voice" hint={providerKey !== "local" && providerKey !== "azure" ? "Optional - the Arabic voice also speaks English." : undefined}>
+          {voiceSelect("voice.english_voice_id", englishVoices)}
+        </Field>
+        <Field label="Speaking speed"><Input type="number" step="0.05" min="0.5" max="2" {...register("voice.speed", { valueAsNumber: true })} /></Field>
+      </div>
+      {providerKey === "azure" && (
+        <div className="grid gap-3 md:grid-cols-2">
+          <SwitchField control={control} name="voice.match_caller_dialect" label="Answer in the caller's dialect"
+            hint="Saudi callers hear a Saudi voice, Egyptian callers an Egyptian voice, and so on." />
+          <Field label="Voice gender">
+            <Select {...register("voice.gender")}><option value="male">Male</option><option value="female">Female</option></Select>
+          </Field>
+        </div>
+      )}
+      <SwitchField control={control} name="voice.thinking_fillers" label="Natural pauses"
+        hint={'Says "لحظة من فضلك" / "One moment" when checking information takes a moment, instead of going silent.'} />
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="button" variant="outline" size="sm" disabled={preview.isPending || !provider?.configured} onClick={() => preview.mutate("ar")}>▶ Preview Arabic</Button>
+        <Button type="button" variant="outline" size="sm" disabled={preview.isPending || !provider?.configured} onClick={() => preview.mutate("en")}>▶ Preview English</Button>
+        {preview.isPending && <Spinner />}
+      </div>
+      <ErrorBox error={preview.error} />
+      {provider?.cloning && providerKey === "neural" && provider.configured && (
+        <CloneVoice onCloned={(vid) => { void qc.invalidateQueries({ queryKey: ["voice-catalog"] }); setValue("voice.voice_id", vid, { shouldDirty: true }); }} />
+      )}
+      {providerKey === "elevenlabs" && (
+        <p className="text-xs text-muted-foreground">To use your own voice with ElevenLabs, create it in your ElevenLabs account (Voice Lab) - it then appears in this list.</p>
+      )}
     </Section>
   );
 }

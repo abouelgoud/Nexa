@@ -19,6 +19,7 @@ from nexa.api.routes import (
     tenants,
     test,
     tools,
+    voices,
     workflows,
 )
 from nexa.core.config import get_settings
@@ -61,7 +62,7 @@ def create_app() -> FastAPI:
 
     app.include_router(health.router)
     for module in (auth, tenants, agents, workflows, tools, integrations, knowledge, phone_numbers, calls, analytics,
-                   test):
+                   test, voices):
         app.include_router(module.router)
     app.include_router(agents.templates_router)
     setup_tracing(app, s.otel_exporter_otlp_endpoint)

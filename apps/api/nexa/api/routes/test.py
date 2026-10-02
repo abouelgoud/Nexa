@@ -21,16 +21,19 @@ from nexa.runtime.session import ConversationRuntime, TurnResult
 from nexa.schemas.agent_definition import AgentDefinition
 from nexa.services.agents import create_snapshot, get_agent
 from nexa.services.usage import record_usage
+from nexa.services.voices import resolve_voice, stt_keywords
 
 router = APIRouter(prefix="/test", tags=["test"], dependencies=[Depends(limiter("test", 240))])
 
 
 async def _speak(ctx: TenantContext, rt: ConversationRuntime, result: TurnResult) -> list[dict[str, Any]]:
-    tts = get_tts()
-    if tts is None or not result.replies:
-        return []
     defn: AgentDefinition = rt.definition
-    voice = defn.voice.english_voice_id if rt.lang == "en" and defn.voice.english_voice_id else defn.voice.voice_id
+    provider, voice = resolve_voice(defn, rt.lang, rt.session.dialect)
+    tts = get_tts(provider)
+    if tts is None or not result.replies:
+        if result.replies and tts is None:
+            return [{"error": f"The '{provider}' voice is not configured on this server."}]
+        return []
     clips = []
     for text in result.replies:
         try:
@@ -103,7 +106,8 @@ async def send_audio(session_id: UUID, file: UploadFile = File(...), voice: bool
     t0 = time.perf_counter()
     try:
         tr = await stt.transcribe(audio, mime_type=file.content_type or "audio/webm",
-                                  prompt="محادثة هاتفية لحجز موعد. Arabic and English phone conversation.")
+                                  prompt="محادثة هاتفية لحجز موعد. Arabic and English phone conversation.",
+                                  keywords=stt_keywords(rt.definition))
     except STTError as exc:
         raise ServiceUnavailable("Speech recognition is not available right now. Is the STT service running?",
                                  details=str(exc)) from exc
