@@ -19,7 +19,7 @@ jobs:
       - name: No source files hidden by .gitignore
         run: |
           hidden=$(git ls-files --others --ignored --exclude-standard --directory apps packages services infrastructure \
-            | grep -vE '(node_modules|\.next|__pycache__|\.venv|\.pytest_cache|\.ruff_cache|egg-info|next-env\\.d\\.ts|tsbuildinfo)' || true)
+            | grep -vE '(node_modules|\.next|__pycache__|\.venv|\.pytest_cache|\.ruff_cache|egg-info|next-env\.d\.ts|tsbuildinfo)' || true)
           if [ -n "$hidden" ]; then echo "Ignored source paths:"; echo "$hidden"; exit 1; fi
       - name: Install
         run: pip install -e 'apps/api[dev]'
