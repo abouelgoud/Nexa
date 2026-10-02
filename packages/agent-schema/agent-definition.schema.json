@@ -1,0 +1,492 @@
+{
+  "$defs": {
+    "ArabicDialect": {
+      "enum": [
+        "sa",
+        "gulf",
+        "ae",
+        "kw",
+        "qa",
+        "bh",
+        "om",
+        "iq",
+        "levant",
+        "eg",
+        "sd",
+        "ye",
+        "ly",
+        "tn",
+        "dz",
+        "ma",
+        "ar"
+      ],
+      "title": "ArabicDialect",
+      "type": "string"
+    },
+    "Capability": {
+      "enum": [
+        "answer_questions",
+        "book_appointment",
+        "cancel_appointment",
+        "reschedule_appointment",
+        "get_appointment",
+        "transfer_call",
+        "take_order",
+        "check_order_status",
+        "make_reservation",
+        "capture_lead",
+        "collect_information"
+      ],
+      "title": "Capability",
+      "type": "string"
+    },
+    "GeneralSettings": {
+      "additionalProperties": false,
+      "properties": {
+        "business_name": {
+          "default": "",
+          "title": "Business Name",
+          "type": "string"
+        },
+        "industry": {
+          "default": "general",
+          "title": "Industry",
+          "type": "string"
+        },
+        "greeting": {
+          "default": "",
+          "title": "Greeting",
+          "type": "string"
+        },
+        "greeting_en": {
+          "default": "",
+          "title": "Greeting En",
+          "type": "string"
+        },
+        "timezone": {
+          "default": "Asia/Riyadh",
+          "title": "Timezone",
+          "type": "string"
+        },
+        "operating_hours": {
+          "items": {
+            "$ref": "#/$defs/OperatingDay"
+          },
+          "title": "Operating Hours",
+          "type": "array"
+        }
+      },
+      "title": "GeneralSettings",
+      "type": "object"
+    },
+    "HandoffConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "default_target": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Default Target"
+        },
+        "targets": {
+          "items": {
+            "$ref": "#/$defs/TransferTarget"
+          },
+          "title": "Targets",
+          "type": "array"
+        },
+        "on_explicit_request": {
+          "default": true,
+          "title": "On Explicit Request",
+          "type": "boolean"
+        },
+        "on_low_confidence": {
+          "default": true,
+          "title": "On Low Confidence",
+          "type": "boolean"
+        },
+        "confidence_threshold": {
+          "default": 0.5,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence Threshold",
+          "type": "number"
+        },
+        "on_task_failure": {
+          "default": true,
+          "title": "On Task Failure",
+          "type": "boolean"
+        },
+        "after_hours_message": {
+          "default": "",
+          "title": "After Hours Message",
+          "type": "string"
+        }
+      },
+      "title": "HandoffConfig",
+      "type": "object"
+    },
+    "Language": {
+      "enum": [
+        "ar",
+        "en"
+      ],
+      "title": "Language",
+      "type": "string"
+    },
+    "LanguageBehavior": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "default": "match_caller",
+          "enum": [
+            "match_caller",
+            "fixed"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "primary_language": {
+          "$ref": "#/$defs/Language",
+          "default": "ar"
+        },
+        "code_switching": {
+          "default": true,
+          "title": "Code Switching",
+          "type": "boolean"
+        },
+        "response_dialect": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ArabicDialect"
+            },
+            {
+              "const": "match_caller",
+              "type": "string"
+            }
+          ],
+          "default": "match_caller",
+          "title": "Response Dialect"
+        }
+      },
+      "title": "LanguageBehavior",
+      "type": "object"
+    },
+    "OperatingDay": {
+      "additionalProperties": false,
+      "properties": {
+        "day": {
+          "enum": [
+            "sun",
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri",
+            "sat"
+          ],
+          "title": "Day",
+          "type": "string"
+        },
+        "open": {
+          "pattern": "^\\d{2}:\\d{2}$",
+          "title": "Open",
+          "type": "string"
+        },
+        "close": {
+          "pattern": "^\\d{2}:\\d{2}$",
+          "title": "Close",
+          "type": "string"
+        }
+      },
+      "required": [
+        "day",
+        "open",
+        "close"
+      ],
+      "title": "OperatingDay",
+      "type": "object"
+    },
+    "Personality": {
+      "additionalProperties": false,
+      "properties": {
+        "tone": {
+          "default": "professional",
+          "enum": [
+            "professional",
+            "friendly",
+            "warm",
+            "formal",
+            "energetic"
+          ],
+          "title": "Tone",
+          "type": "string"
+        },
+        "verbosity": {
+          "default": "concise",
+          "enum": [
+            "concise",
+            "balanced",
+            "detailed"
+          ],
+          "title": "Verbosity",
+          "type": "string"
+        },
+        "custom_instructions": {
+          "default": "",
+          "maxLength": 4000,
+          "title": "Custom Instructions",
+          "type": "string"
+        }
+      },
+      "title": "Personality",
+      "type": "object"
+    },
+    "Policies": {
+      "additionalProperties": false,
+      "properties": {
+        "require_confirmation_for_booking": {
+          "default": true,
+          "title": "Require Confirmation For Booking",
+          "type": "boolean"
+        },
+        "never_invent_information": {
+          "default": true,
+          "title": "Never Invent Information",
+          "type": "boolean"
+        },
+        "human_handoff_enabled": {
+          "default": true,
+          "title": "Human Handoff Enabled",
+          "type": "boolean"
+        }
+      },
+      "title": "Policies",
+      "type": "object"
+    },
+    "PrivacyConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "record_calls": {
+          "default": false,
+          "title": "Record Calls",
+          "type": "boolean"
+        },
+        "store_audio": {
+          "default": false,
+          "title": "Store Audio",
+          "type": "boolean"
+        },
+        "store_transcript": {
+          "default": true,
+          "title": "Store Transcript",
+          "type": "boolean"
+        },
+        "retention_days": {
+          "default": 30,
+          "maximum": 3650,
+          "minimum": 1,
+          "title": "Retention Days",
+          "type": "integer"
+        },
+        "consent_required": {
+          "default": false,
+          "title": "Consent Required",
+          "type": "boolean"
+        },
+        "consent_message": {
+          "default": "",
+          "title": "Consent Message",
+          "type": "string"
+        }
+      },
+      "title": "PrivacyConfig",
+      "type": "object"
+    },
+    "TransferTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "pattern": "^[a-z0-9_]{1,50}$",
+          "title": "Key",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "phone_number": {
+          "pattern": "^\\+?[0-9]{3,20}$",
+          "title": "Phone Number",
+          "type": "string"
+        },
+        "only_during_business_hours": {
+          "default": false,
+          "title": "Only During Business Hours",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "key",
+        "label",
+        "phone_number"
+      ],
+      "title": "TransferTarget",
+      "type": "object"
+    },
+    "VoiceConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "default": "local",
+          "title": "Provider",
+          "type": "string"
+        },
+        "voice_id": {
+          "default": "default-ar",
+          "title": "Voice Id",
+          "type": "string"
+        },
+        "english_voice_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "default-en",
+          "title": "English Voice Id"
+        },
+        "speed": {
+          "default": 1.0,
+          "maximum": 2.0,
+          "minimum": 0.5,
+          "title": "Speed",
+          "type": "number"
+        }
+      },
+      "title": "VoiceConfig",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "name": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "description": {
+      "default": "",
+      "maxLength": 2000,
+      "title": "Description",
+      "type": "string"
+    },
+    "general": {
+      "$ref": "#/$defs/GeneralSettings"
+    },
+    "languages": {
+      "items": {
+        "$ref": "#/$defs/Language"
+      },
+      "minItems": 1,
+      "title": "Languages",
+      "type": "array"
+    },
+    "arabic_dialects": {
+      "items": {
+        "$ref": "#/$defs/ArabicDialect"
+      },
+      "title": "Arabic Dialects",
+      "type": "array"
+    },
+    "language_behavior": {
+      "$ref": "#/$defs/LanguageBehavior"
+    },
+    "voice": {
+      "$ref": "#/$defs/VoiceConfig"
+    },
+    "personality": {
+      "$ref": "#/$defs/Personality"
+    },
+    "capabilities": {
+      "items": {
+        "$ref": "#/$defs/Capability"
+      },
+      "title": "Capabilities",
+      "type": "array"
+    },
+    "knowledge_base_ids": {
+      "items": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "title": "Knowledge Base Ids",
+      "type": "array"
+    },
+    "tool_ids": {
+      "items": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "title": "Tool Ids",
+      "type": "array"
+    },
+    "workflow_id": {
+      "anyOf": [
+        {
+          "format": "uuid",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Workflow Id"
+    },
+    "execution_mode": {
+      "default": "agent",
+      "enum": [
+        "agent",
+        "workflow"
+      ],
+      "title": "Execution Mode",
+      "type": "string"
+    },
+    "policies": {
+      "$ref": "#/$defs/Policies"
+    },
+    "handoff": {
+      "$ref": "#/$defs/HandoffConfig"
+    },
+    "privacy": {
+      "$ref": "#/$defs/PrivacyConfig"
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "title": "AgentDefinition",
+  "type": "object"
+}

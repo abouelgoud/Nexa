@@ -1,0 +1,82 @@
+{
+  "$defs": {
+    "ToolCategory": {
+      "enum": [
+        "database",
+        "rest_api",
+        "calendar",
+        "crm",
+        "sms",
+        "email",
+        "whatsapp",
+        "voice",
+        "workflow",
+        "human_handoff",
+        "knowledge"
+      ],
+      "title": "ToolCategory",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "pattern": "^[a-z][a-z0-9_]{1,63}$",
+      "title": "Name",
+      "type": "string"
+    },
+    "display_name": {
+      "default": "",
+      "title": "Display Name",
+      "type": "string"
+    },
+    "description": {
+      "maxLength": 1000,
+      "minLength": 3,
+      "title": "Description",
+      "type": "string"
+    },
+    "category": {
+      "$ref": "#/$defs/ToolCategory"
+    },
+    "executor": {
+      "enum": [
+        "database",
+        "rest_api",
+        "transfer_call",
+        "end_call",
+        "knowledge_search"
+      ],
+      "title": "Executor",
+      "type": "string"
+    },
+    "input_schema": {
+      "additionalProperties": true,
+      "title": "Input Schema",
+      "type": "object"
+    },
+    "requires_confirmation": {
+      "default": false,
+      "title": "Requires Confirmation",
+      "type": "boolean"
+    },
+    "confirmation_template": {
+      "default": "",
+      "title": "Confirmation Template",
+      "type": "string"
+    },
+    "config": {
+      "additionalProperties": true,
+      "title": "Config",
+      "type": "object"
+    }
+  },
+  "required": [
+    "name",
+    "description",
+    "category",
+    "executor"
+  ],
+  "title": "ToolDefinition",
+  "type": "object"
+}

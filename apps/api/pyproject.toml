@@ -1,0 +1,55 @@
+[project]
+name = "nexa"
+version = "0.1.0"
+description = "Nexa - multi-tenant no-code AI voice agent platform (API, runtime, worker core)"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "pydantic>=2.8",
+  "pydantic-settings>=2.4",
+  "email-validator>=2.2",
+  "sqlalchemy[asyncio]>=2.0.30",
+  "asyncpg>=0.29",
+  "psycopg2-binary>=2.9",
+  "alembic>=1.13",
+  "pgvector>=0.3",
+  "redis>=5.0",
+  "httpx>=0.27",
+  "python-jose[cryptography]>=3.3",
+  "bcrypt>=4.1",
+  "cryptography>=42",
+  "jsonschema>=4.22",
+  "python-multipart>=0.0.9",
+  "pypdf>=4.2",
+  "python-docx>=1.1",
+  "prometheus-client>=0.20",
+  "opentelemetry-sdk>=1.25",
+  "opentelemetry-instrumentation-fastapi>=0.46b0",
+  "opentelemetry-exporter-otlp-proto-http>=1.25",
+  "livekit-api>=0.7",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.5"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["nexa*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ASYNC"]
+ignore = ["E501", "B008"]
