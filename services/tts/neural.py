@@ -86,14 +86,17 @@ def save_reference(voice_id: str, data: bytes) -> dict:
         audio = np.interp(np.linspace(0, len(audio) - 1, n), np.arange(len(audio)), audio)
         rate = 24000
     seconds = len(audio) / rate
-    if seconds < 5:
-        raise ValueError("The recording is too short. Use 10 to 30 seconds of clear speech.")
+    if seconds < 4:
+        raise ValueError("The recording is too short (minimum 4 seconds; 10 to 30 seconds gives the closest match).")
     audio = audio[: MAX_REFERENCE_SECONDS * rate]
     peak = float(np.max(np.abs(audio))) or 1.0
     audio = audio / peak * 0.9
     VOICE_DIR.mkdir(parents=True, exist_ok=True)
     (VOICE_DIR / f"{voice_id}.wav").write_bytes(_to_wav(audio, rate))
-    return {"seconds": round(min(seconds, MAX_REFERENCE_SECONDS), 1)}
+    info = {"seconds": round(min(seconds, MAX_REFERENCE_SECONDS), 1)}
+    if seconds < 10:
+        info["advice"] = "Short recording: a 10-30 second clip will sound closer to the speaker."
+    return info
 
 
 def synthesize(text: str, voice_id: str, language: str) -> tuple[bytes, int]:

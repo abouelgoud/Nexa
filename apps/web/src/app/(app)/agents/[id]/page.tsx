@@ -193,7 +193,7 @@ function CloneVoice({ onCloned }: { onCloned: (id: string) => void }) {
   return (
     <div className="space-y-2 rounded-lg border border-dashed p-3">
       <div className="text-sm font-medium">Create your own voice</div>
-      <p className="text-xs text-muted-foreground">Upload 10-30 seconds of one person speaking clearly (e.g. your receptionist). The agent will speak in that voice.</p>
+      <p className="text-xs text-muted-foreground">Upload a recording of one person speaking clearly (e.g. your receptionist) - at least 4 seconds, ideally 10-30. The agent will speak in that voice.</p>
       <div className="grid gap-2 md:grid-cols-2">
         <Input placeholder="Voice name (e.g. Sara reception)" value={name} onChange={(e) => setName(e.target.value)} />
         <Input type="file" accept="audio/*" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />

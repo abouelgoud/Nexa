@@ -108,7 +108,7 @@ async def clone(name: str = Form(..., min_length=1, max_length=60), consent: boo
         raise ServiceUnavailable("The natural voice service is not available.")
     audio = await file.read(15_000_000)
     if len(audio) < 20_000:
-        raise ValidationFailed("The recording is too short. Upload 10 to 30 seconds of clear speech.")
+        raise ValidationFailed("The recording is too short. Upload at least 4 seconds (10 to 30 seconds is best).")
     slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:30] or "voice"
     voice_id = f"t{ctx.tenant_id.hex[:8]}-{slug}"
     try:
