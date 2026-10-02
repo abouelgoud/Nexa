@@ -14,3 +14,4 @@ models/
 data/
 coverage/
 next-env.d.ts
+.dev/

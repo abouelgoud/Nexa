@@ -38,6 +38,14 @@ Workflow mode runs fully without an LLM; agent mode (LLM chooses actions) needs 
 
 ### Local development without Docker
 
+On macOS, one command installs what's missing (Homebrew), creates the databases and runs the API and web app:
+
+```bash
+scripts/dev-mac.sh            # then open http://localhost:3000
+```
+
+Or manually:
+
 ```bash
 # API (Python 3.11+, PostgreSQL 16 with pgvector, Redis optional)
 cd apps/api && pip install -e '.[dev]'
