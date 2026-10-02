@@ -99,6 +99,10 @@ def save_reference(voice_id: str, data: bytes) -> dict:
     return info
 
 
+def delete_reference(voice_id: str) -> None:
+    (VOICE_DIR / f"{voice_id}.wav").unlink(missing_ok=True)
+
+
 def synthesize(text: str, voice_id: str, language: str) -> tuple[bytes, int]:
     import numpy as np
 

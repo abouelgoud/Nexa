@@ -102,8 +102,9 @@ def _build_cloud_tts(provider: str) -> TTSProvider | None:
         return AzureTTS(s.azure_speech_key, s.azure_speech_region)
     if provider == "neural":
         from nexa.providers.tts.neural_http import NeuralHTTPTTS
+        from nexa.services.voice_library import saved_recording
 
-        return NeuralHTTPTTS(s.neural_tts_base_url)
+        return NeuralHTTPTTS(s.neural_tts_base_url, restore=saved_recording)
     return None
 
 

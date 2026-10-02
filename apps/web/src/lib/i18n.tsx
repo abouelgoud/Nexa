@@ -5,7 +5,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 /** Arabic/English from day one: UI strings + document direction. */
 const dict = {
   en: {
-    dashboard: "Dashboard", agents: "Agents", calls: "Calls", settings: "Settings", logout: "Sign out",
+    dashboard: "Dashboard", agents: "Agents", voices: "Voices", calls: "Calls", settings: "Settings", logout: "Sign out",
     newAgent: "New agent", general: "General", languages: "Languages", voice: "Voice", personality: "Personality",
     knowledge: "Knowledge", actions: "Actions", workflow: "Workflow", integrations: "Integrations", phone: "Phone",
     testing: "Testing", publish: "Publish", analytics: "Analytics", save: "Save changes", saved: "Saved",
@@ -14,7 +14,7 @@ const dict = {
     language: "العربية", behaviour: "Behaviour & safety", privacy: "Privacy & recording",
   },
   ar: {
-    dashboard: "لوحة التحكم", agents: "الوكلاء", calls: "المكالمات", settings: "الإعدادات", logout: "تسجيل الخروج",
+    dashboard: "لوحة التحكم", agents: "الوكلاء", voices: "الأصوات", calls: "المكالمات", settings: "الإعدادات", logout: "تسجيل الخروج",
     newAgent: "وكيل جديد", general: "عام", languages: "اللغات", voice: "الصوت", personality: "الشخصية",
     knowledge: "المعرفة", actions: "الإجراءات", workflow: "سير المحادثة", integrations: "الربط", phone: "الهاتف",
     testing: "التجربة", publish: "النشر", analytics: "التحليلات", save: "حفظ التغييرات", saved: "تم الحفظ",

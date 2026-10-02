@@ -12,12 +12,14 @@ import {
 } from "@nexa/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, CircleAlert, Plus, Trash2, TriangleAlert } from "lucide-react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Controller, useFieldArray, useForm, type Control } from "react-hook-form";
 
 import { ErrorBox } from "@/components/error-box";
-import { api, get, post } from "@/lib/api";
+import { VoiceUpload } from "@/components/voice-upload";
+import { get, post } from "@/lib/api";
 import { formatDate } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
 import { useAgent, useChecklist, useSaveAgentConfig, useVersions } from "@/lib/queries";
@@ -176,41 +178,6 @@ function playBase64(clip: { mime_type: string; audio_base64: string }) {
   void new Audio(`data:${clip.mime_type};base64,${clip.audio_base64}`).play();
 }
 
-function CloneVoice({ onCloned }: { onCloned: (id: string) => void }) {
-  const [name, setName] = useState("");
-  const [file, setFile] = useState<File | null>(null);
-  const [consent, setConsent] = useState(false);
-  const clone = useMutation({
-    mutationFn: () => {
-      const form = new FormData();
-      form.append("name", name);
-      form.append("consent", String(consent));
-      form.append("file", file as File);
-      return api<{ id: string }>("/voices/clone", { method: "POST", form });
-    },
-    onSuccess: (v) => onCloned(v.id),
-  });
-  return (
-    <div className="space-y-2 rounded-lg border border-dashed p-3">
-      <div className="text-sm font-medium">Create your own voice</div>
-      <p className="text-xs text-muted-foreground">Upload a recording of one person speaking clearly (e.g. your receptionist) - at least 4 seconds, ideally 10-30. The agent will speak in that voice.</p>
-      <div className="grid gap-2 md:grid-cols-2">
-        <Input placeholder="Voice name (e.g. Sara reception)" value={name} onChange={(e) => setName(e.target.value)} />
-        <Input type="file" accept="audio/*" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-      </div>
-      <label className="flex items-start gap-2 text-xs">
-        <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} className="mt-0.5" />
-        I have the speaker&apos;s permission to create and use a voice from this recording.
-      </label>
-      <ErrorBox error={clone.error} />
-      {clone.isSuccess && <Alert variant="success">Voice created and selected.</Alert>}
-      <Button type="button" size="sm" variant="outline" disabled={!name || !file || !consent || clone.isPending} onClick={() => clone.mutate()}>
-        {clone.isPending ? "Creating…" : "Create voice"}
-      </Button>
-    </div>
-  );
-}
-
 function VoiceSection({ form }: { form: Form }) {
   const { register, control, watch, setValue } = form;
   const qc = useQueryClient();
@@ -291,11 +258,16 @@ function VoiceSection({ form }: { form: Form }) {
         {preview.isPending && <Spinner />}
       </div>
       <ErrorBox error={preview.error} />
-      {provider?.cloning && providerKey === "neural" && provider.configured && (
-        <CloneVoice onCloned={(vid) => { void qc.invalidateQueries({ queryKey: ["voice-catalog"] }); setValue("voice.voice_id", vid, { shouldDirty: true }); }} />
-      )}
-      {providerKey === "elevenlabs" && (
-        <p className="text-xs text-muted-foreground">To use your own voice with ElevenLabs, create it in your ElevenLabs account (Voice Lab) - it then appears in this list.</p>
+      {provider?.cloning && (
+        <details className="rounded-lg border border-dashed p-3">
+          <summary className="cursor-pointer text-sm font-medium">Use your own voice</summary>
+          <div className="mt-3 space-y-2">
+            <VoiceUpload engines={[{ key: providerKey as "neural" | "elevenlabs", label: provider.label, available: provider.configured }]}
+              defaultEngine={providerKey}
+              onCreated={(v) => { void qc.invalidateQueries({ queryKey: ["voice-catalog"] }); setValue("voice.voice_id", v.voice_id, { shouldDirty: true }); }} />
+            <p className="text-xs text-muted-foreground">All your voices are managed on the <Link href="/voices" className="text-primary hover:underline">Voices</Link> page.</p>
+          </div>
+        </details>
       )}
     </Section>
   );

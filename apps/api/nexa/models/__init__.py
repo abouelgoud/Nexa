@@ -26,11 +26,12 @@ from nexa.models.knowledge import Document, DocumentChunk, KnowledgeBase
 from nexa.models.ops import AuditLog, UsageRecord
 from nexa.models.telephony import PhoneNumber, PhoneRoute
 from nexa.models.tools import AgentTool, Integration, IntegrationCredential, Tool, ToolVersion
+from nexa.models.voices import Voice
 
 __all__ = [
     "Agent", "AgentLanguage", "AgentRule", "AgentTool", "AgentVersion", "AgentVoice", "AuditLog", "Base",
     "Call", "CallEvent", "CallParticipant", "Conversation", "Document", "DocumentChunk", "Integration",
     "IntegrationCredential", "KnowledgeBase", "Message", "PhoneNumber", "PhoneRoute", "Tenant", "TenantScoped",
-    "TenantUser", "Tool", "ToolExecution", "ToolVersion", "Transcript", "UsageRecord", "User", "Workflow",
+    "TenantUser", "Tool", "ToolExecution", "ToolVersion", "Transcript", "UsageRecord", "User", "Voice", "Workflow",
     "WorkflowEdge", "WorkflowExecution", "WorkflowNode",
 ]

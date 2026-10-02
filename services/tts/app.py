@@ -120,6 +120,14 @@ async def clone_voice(voice_id: str = Form(...), file: UploadFile = File(...)) -
     return {"id": voice_id, **info}
 
 
+@app.delete("/voices/{voice_id}")
+def delete_voice(voice_id: str) -> dict:
+    if not re.fullmatch(r"[a-z0-9][a-z0-9\-]{1,60}", voice_id):
+        raise HTTPException(400, "invalid voice id")
+    neural.delete_reference(voice_id)
+    return {"deleted": voice_id}
+
+
 @app.post("/synthesize")
 def synthesize(req: SynthesisRequest) -> Response:
     if req.engine == "neural":

@@ -1,7 +1,7 @@
 "use client";
 
 import { Button, Select, Spinner, cn } from "@nexa/ui";
-import { Bot, Languages, LayoutDashboard, LogOut, PhoneCall, Settings } from "lucide-react";
+import { AudioLines, Bot, Languages, LayoutDashboard, LogOut, PhoneCall, Settings } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -18,6 +18,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const nav = [
     { href: "/dashboard", label: t("dashboard"), icon: LayoutDashboard },
     { href: "/agents", label: t("agents"), icon: Bot },
+    { href: "/voices", label: t("voices"), icon: AudioLines },
     { href: "/calls", label: t("calls"), icon: PhoneCall },
     { href: "/settings", label: t("settings"), icon: Settings },
   ];

@@ -50,6 +50,20 @@ class ElevenLabsTTS(TTSProvider):
         return [{"id": v["voice_id"], "name": v.get("name", v["voice_id"]),
                  "labels": v.get("labels") or {}, "category": v.get("category")} for v in r.json().get("voices", [])]
 
+    async def add_voice(self, name: str, audio: bytes, filename: str) -> str:
+        """Instant voice clone in the ElevenLabs account; returns the new voice_id."""
+        r = await self._client.post(f"{self.base_url}/v1/voices/add",
+                                    data={"name": name, "remove_background_noise": "true"},
+                                    files={"files": (filename, audio)})
+        if r.status_code >= 400:
+            raise TTSError(f"ElevenLabs voice cloning failed ({r.status_code}): {r.text[:200]}")
+        return r.json()["voice_id"]
+
+    async def delete_voice(self, voice_id: str) -> None:
+        r = await self._client.delete(f"{self.base_url}/v1/voices/{voice_id}")
+        if r.status_code >= 400 and r.status_code != 404:
+            raise TTSError(f"ElevenLabs voice deletion failed ({r.status_code})")
+
     async def health(self) -> bool:
         try:
             return (await self._client.get(f"{self.base_url}/v1/voices", timeout=5)).status_code == 200

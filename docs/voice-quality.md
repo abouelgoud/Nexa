@@ -15,8 +15,12 @@ the **recognition engine per deployment** (`STT_PROVIDER`). Everything sits behi
 
 * **Answer in the caller's dialect** (Azure): the agent detects the caller's dialect and replies with a native voice
   of that dialect - an Egyptian caller hears an Egyptian voice, a Kuwaiti caller a Kuwaiti one.
-* **Your own voice** (Natural engine): Agent → Voice → *Create your own voice*. Upload 10-30 s of one person speaking
-  clearly and confirm you have their permission. The agent then speaks in that voice in Arabic and English.
+* **Your own voices** - the **Voices** page (sidebar): upload a recording, give it any name (Arabic or English), choose
+  the engine (Natural self-hosted or ElevenLabs) and confirm you have the speaker's permission. The voice appears in the
+  list - play the original recording, hear the clone, rename or delete it - and in every agent's voice picker as
+  "<name> (your voice)". Deleting is blocked while an agent's draft or live version still uses the voice. The original
+  recording is stored with the voice, so a self-hosted clone is re-created automatically if the voice service loses it.
+  Use at least 4 seconds of one clear speaker; 10-30 seconds sounds closest.
 * **Natural pauses**: when checking information takes a moment, the agent says "لحظة من فضلك" / "One moment" instead
   of going silent - like a receptionist would.
 * **Preview**: every voice can be played from the settings page before you save.

@@ -186,21 +186,135 @@ async def test_catalog_preview_and_dialect_voice_in_test_console(account, monkey
     assert fake.calls[-1] == ("ar-EG-SalmaNeural", "ar")  # Egyptian caller hears an Egyptian voice
 
 
-async def test_voice_cloning_requires_consent(account):
-    class FakeNeural(FakeTTS):
-        async def clone(self, voice_id, audio, filename):
-            self.cloned = voice_id
-            return {"id": voice_id, "seconds": 12.0}
+class FakeNeural(FakeTTS):
+    name = "neural"
 
-    fake = FakeNeural()
-    registry.override("tts:neural", fake)
-    files = {"file": ("ref.wav", tone_wav(24000, 1.0))}
-    r = await account.client.post("/voices/clone", headers=account.headers, data={"name": "Sara", "consent": "false"}, files=files)
+    def __init__(self):
+        super().__init__()
+        self.cloned: dict[str, bytes] = {}
+        self.deleted: list[str] = []
+
+    async def clone(self, voice_id, audio, filename):
+        self.cloned[voice_id] = audio
+        return {"id": voice_id, "seconds": 12.0}
+
+    async def delete_voice(self, voice_id):
+        self.deleted.append(voice_id)
+
+
+def upload(account, name, consent="true", provider="neural", seconds=1.0):
+    return account.client.post("/voices", headers=account.headers,
+                                data={"name": name, "consent": consent, "provider": provider},
+                                files={"file": ("recording.wav", tone_wav(24000, seconds), "audio/wav")})
+
+
+async def test_voice_library_upload_list_use_rename_delete(account):
+    neural = FakeNeural()
+    registry.override("tts:neural", neural)
+    r = await upload(account, "نورة", consent="false")
     assert r.status_code == 422 and "permission" in r.json()["error"]["message"]
-    r = await account.client.post("/voices/clone", headers=account.headers, data={"name": "Sara Reception", "consent": "true"},
-                                  files={"file": ("ref.wav", tone_wav(24000, 1.0))})
+
+    r = await upload(account, "نورة")
     assert r.status_code == 201, r.text
-    assert r.json()["id"].endswith("-sara-reception") and fake.cloned == r.json()["id"]
+    voice = r.json()
+    assert voice["name"] == "نورة" and voice["provider"] == "neural" and voice["seconds"] == 12.0
+    assert voice["voice_id"] in neural.cloned
+    assert (await upload(account, "نورة")).status_code == 409  # unique per business
+
+    listing = (await account.get("/voices")).json()
+    assert [v["name"] for v in listing["voices"]] == ["نورة"]
+    assert {e["key"]: e["available"] for e in listing["engines"]}["neural"] is True
+    rec = await account.get(f"/voices/{voice['id']}/recording")
+    assert rec.status_code == 200 and rec.content.startswith(b"RIFF")
+
+    catalog = (await account.get("/voices/catalog")).json()["providers"]
+    neural_voices = next(p for p in catalog if p["key"] == "neural")["voices"]
+    assert neural_voices[0] == {"id": voice["voice_id"], "name": "نورة (your voice)", "custom": True}
+
+    agent = (await account.post("/agents", {"template_key": "blank", "business_name": "ABC"})).json()
+    cfg = {**agent["draft_config"], "voice": {**agent["draft_config"]["voice"], "provider": "neural",
+                                              "voice_id": voice["voice_id"]}}
+    await account.put(f"/agents/{agent['id']}/config", cfg)
+    r = await account.delete(f"/voices/{voice['id']}")
+    assert r.status_code == 409 and agent["name"] in r.json()["error"]["message"]
+    assert (await account.get("/voices")).json()["voices"][0]["used_by"] == [agent["name"]]
+
+    r = await account.patch(f"/voices/{voice['id']}", {"name": "Noura - reception"})
+    assert r.json()["name"] == "Noura - reception"
+
+    cfg["voice"]["voice_id"] = "default"
+    await account.put(f"/agents/{agent['id']}/config", cfg)
+    assert (await account.delete(f"/voices/{voice['id']}")).status_code == 204
+    assert neural.deleted == [voice["voice_id"]] and (await account.get("/voices")).json()["voices"] == []
+
+
+async def test_voice_in_use_by_published_version_cannot_be_deleted(account):
+    registry.override("tts:neural", FakeNeural())
+    voice = (await upload(account, "Sara")).json()
+    agent = (await account.post("/agents", {"template_key": "blank", "business_name": "ABC"})).json()
+    cfg = {**agent["draft_config"], "voice": {**agent["draft_config"]["voice"], "provider": "neural",
+                                              "voice_id": voice["voice_id"]}}
+    await account.put(f"/agents/{agent['id']}/config", cfg)
+    assert (await account.post(f"/agents/{agent['id']}/publish", {"notes": ""})).status_code == 201
+    cfg["voice"]["voice_id"] = "default"  # draft changed, but live calls still use the voice
+    await account.put(f"/agents/{agent['id']}/config", cfg)
+    assert (await account.delete(f"/voices/{voice['id']}")).status_code == 409
+
+
+async def test_voice_library_is_tenant_isolated(client, account):
+    from tests.conftest import register
+
+    registry.override("tts:neural", FakeNeural())
+    voice = (await upload(account, "Private")).json()
+    other = await register(client, "o@xyz.example.com", "Other")
+    assert (await other.get("/voices")).json()["voices"] == []
+    assert (await other.get(f"/voices/{voice['id']}/recording")).status_code == 404
+    assert (await other.delete(f"/voices/{voice['id']}")).status_code == 404
+
+
+async def test_elevenlabs_cloning(account, monkeypatch):
+    from nexa.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "elevenlabs_api_key", "k")
+    seen = {}
+
+    def handler(req: httpx.Request):
+        if req.url.path == "/v1/voices/add":
+            seen["body"] = req.content.decode("utf-8", "ignore")
+            return httpx.Response(200, json={"voice_id": "EL_NEW"})
+        if req.url.path == "/v1/voices":
+            return httpx.Response(200, json={"voices": [{"voice_id": "EL_NEW", "name": "Noura"},
+                                                        {"voice_id": "EL_STOCK", "name": "Rachel"}]})
+        return httpx.Response(404)
+
+    registry.override("tts:elevenlabs", ElevenLabsTTS("k", transport=httpx.MockTransport(handler)))
+    r = await upload(account, "Noura", provider="elevenlabs")
+    assert r.status_code == 201 and r.json()["voice_id"] == "EL_NEW"
+    assert 'name="name"' in seen["body"] and "Noura" in seen["body"] and 'name="files"' in seen["body"]
+    voices = next(p for p in (await account.get("/voices/catalog")).json()["providers"] if p["key"] == "elevenlabs")["voices"]
+    assert [v["id"] for v in voices] == ["EL_NEW", "EL_STOCK"] and voices[0]["name"] == "Noura (your voice)"
+
+
+async def test_neural_voice_restored_from_saved_recording(account):
+    registry.override("tts:neural", FakeNeural())
+    voice = (await upload(account, "Noura")).json()
+    service_has: set[str] = set()
+    calls = []
+
+    def handler(req: httpx.Request):
+        calls.append(req.url.path)
+        if req.url.path == "/voices/clone":
+            service_has.add(voice["voice_id"])
+            return httpx.Response(200, json={"id": voice["voice_id"], "seconds": 1.0})
+        if voice["voice_id"] not in service_has:
+            return httpx.Response(404, json={"detail": "unknown voice"})  # e.g. the service volume was reset
+        return httpx.Response(200, content=tone_wav(24000))
+
+    from nexa.services.voice_library import saved_recording
+
+    tts = NeuralHTTPTTS("http://tts-neural:8002", transport=httpx.MockTransport(handler), restore=saved_recording)
+    r = await tts.synthesize("مرحبا", voice_id=voice["voice_id"], language="ar")
+    assert is_wav(r.audio) and calls == ["/synthesize", "/voices/clone", "/synthesize"]
 
 
 async def test_audio_turn_passes_vocabulary_to_recognition(account):
