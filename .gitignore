@@ -10,8 +10,8 @@ __pycache__/
 .venv/
 .env
 *.egg-info/
-models/
-data/
+/models/
+/data/
 coverage/
 next-env.d.ts
 .dev/
