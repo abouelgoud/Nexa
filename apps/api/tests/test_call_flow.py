@@ -110,3 +110,18 @@ async def test_outbound_test_call(account, clinic_db):
     n = (await account.post("/phone-numbers", {"e164": "+966117776655", "agent_id": setup["agent"]["id"]})).json()
     r = await account.post(f"/phone-numbers/{n['id']}/outbound-test", {"to": "+966500000009"})
     assert r.status_code == 200 and r.json()["room"].startswith("call-out-")
+
+
+async def test_realtime_browser_test_token(account, clinic_db):
+    from jose import jwt
+
+    setup = await setup_doctor_agent(account)
+    r = await account.post("/test/realtime", {"agent_id": setup["agent"]["id"]})
+    assert r.status_code == 201, r.text
+    body = r.json()
+    claims = jwt.get_unverified_claims(body["token"])
+    assert claims["video"]["room"] == body["room"] and claims["video"]["roomJoin"] is True
+    dispatch = claims["roomConfig"]["agents"][0]
+    assert dispatch["agentName"] == "nexa-voice"
+    assert body["agent_version"]["kind"] == "test"
+    assert (await account.get(f"/calls?external_id={body['room']}")).json() == []

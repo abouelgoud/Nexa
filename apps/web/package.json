@@ -1,0 +1,38 @@
+{
+  "name": "@nexa/web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "start": "next start -p 3000",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@hookform/resolvers": "^5.2.0",
+    "@nexa/agent-schema": "0.1.0",
+    "@nexa/shared-types": "0.1.0",
+    "@nexa/ui": "0.1.0",
+    "@nexa/workflow-engine": "0.1.0",
+    "@tanstack/react-query": "^5.90.0",
+    "@xyflow/react": "^12.8.0",
+    "livekit-client": "^2.22.3",
+    "lucide-react": "^0.540.0",
+    "next": "^16.0.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-hook-form": "^7.62.0",
+    "zod": "^4.3.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "eslint": "^9.0.0",
+    "eslint-config-next": "^16.0.0",
+    "tailwindcss": "^4.1.0",
+    "typescript": "^5.9.0"
+  }
+}

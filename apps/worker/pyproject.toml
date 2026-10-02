@@ -1,0 +1,13 @@
+[project]
+name = "nexa-worker"
+version = "0.1.0"
+description = "Background jobs for Nexa (document ingestion, retention cleanup)"
+requires-python = ">=3.11"
+dependencies = ["nexa"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["nexa_worker*"]

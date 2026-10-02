@@ -1,0 +1,15 @@
+# Development LiveKit server. Change keys for anything reachable from the internet.
+port: 7880
+bind_addresses: ["0.0.0.0"]
+rtc:
+  tcp_port: 7881
+  port_range_start: 50000
+  port_range_end: 50100
+  use_external_ip: false
+  node_ip: 127.0.0.1
+redis:
+  address: redis:6379
+keys:
+  devkey: devsecret_devsecret_devsecret_devsecret
+logging:
+  level: info

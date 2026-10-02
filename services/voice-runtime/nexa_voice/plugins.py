@@ -1,0 +1,101 @@
+"""LiveKit Agents adapters around Nexa's provider interfaces (STT/TTS stay swappable)."""
+
+from __future__ import annotations
+
+import io
+import time
+import uuid
+import wave
+
+from livekit import rtc
+from livekit.agents import APIConnectionError, llm, stt, tts, utils
+from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, NOT_GIVEN, APIConnectOptions, NotGivenOr
+
+from nexa.core.observability import STT_LATENCY, TTS_LATENCY
+from nexa.providers.stt.base import STTError, STTProvider
+from nexa.providers.tts.base import TTSError, TTSProvider
+
+
+def frames_to_wav(buffer: utils.AudioBuffer) -> bytes:
+    frame = rtc.combine_audio_frames(buffer)
+    out = io.BytesIO()
+    with wave.open(out, "wb") as w:
+        w.setnchannels(frame.num_channels)
+        w.setsampwidth(2)
+        w.setframerate(frame.sample_rate)
+        w.writeframes(frame.data.tobytes())
+    return out.getvalue()
+
+
+class NexaSTT(stt.STT):
+    """Non-streaming STT; AgentSession pairs it with VAD to segment caller utterances."""
+
+    def __init__(self, provider: STTProvider, prompt: str | None = None):
+        super().__init__(capabilities=stt.STTCapabilities(streaming=False, interim_results=False))
+        self._provider = provider
+        self._prompt = prompt
+        self.last_language: str | None = None
+
+    async def _recognize_impl(self, buffer: utils.AudioBuffer, *, language: NotGivenOr[str] = NOT_GIVEN,
+                              conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS) -> stt.SpeechEvent:
+        start = time.perf_counter()
+        try:
+            result = await self._provider.transcribe(frames_to_wav(buffer), mime_type="audio/wav",
+                                                     language=language or None, prompt=self._prompt)
+        except STTError as exc:
+            raise APIConnectionError(str(exc)) from exc
+        STT_LATENCY.observe(time.perf_counter() - start)
+        self.last_language = result.language
+        return stt.SpeechEvent(
+            type=stt.SpeechEventType.FINAL_TRANSCRIPT, request_id=uuid.uuid4().hex,
+            alternatives=[stt.SpeechData(language=result.language or "", text=result.text)],
+        )
+
+
+class NexaTTS(tts.TTS):
+    def __init__(self, provider: TTSProvider, voice_id: str, language: str = "ar", speed: float = 1.0,
+                 sample_rate: int = 22050):
+        super().__init__(capabilities=tts.TTSCapabilities(streaming=False), sample_rate=sample_rate, num_channels=1)
+        self._provider = provider
+        self.voice_id = voice_id
+        self.language = language
+        self.speed = speed
+
+    def synthesize(self, text: str, *, conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS) -> tts.ChunkedStream:
+        return _NexaChunkedStream(tts=self, input_text=text, conn_options=conn_options)
+
+
+class _NexaChunkedStream(tts.ChunkedStream):
+    def __init__(self, *, tts: NexaTTS, input_text: str, conn_options: APIConnectOptions):
+        super().__init__(tts=tts, input_text=input_text, conn_options=conn_options)
+        self._nexa_tts = tts
+
+    async def _run(self, output_emitter: tts.AudioEmitter) -> None:
+        t = self._nexa_tts
+        start = time.perf_counter()
+        try:
+            result = await t._provider.synthesize(self.input_text, voice_id=t.voice_id, language=t.language, speed=t.speed)
+        except TTSError as exc:
+            raise APIConnectionError(str(exc)) from exc
+        TTS_LATENCY.observe(time.perf_counter() - start)
+        output_emitter.initialize(request_id=uuid.uuid4().hex, sample_rate=result.sample_rate, num_channels=1,
+                                  mime_type="audio/wav")
+        output_emitter.push(result.audio)
+        output_emitter.flush()
+
+
+class RuntimeLLM(llm.LLM):
+    """Marker LLM: AgentSession only generates replies when an LLM is configured. Replies actually come from
+    NexaVoiceAgent.llm_node -> ConversationRuntime (workflow engine or the configured LLMProvider), so chat()
+    is never called."""
+
+    @property
+    def model(self) -> str:
+        return "nexa-runtime"
+
+    @property
+    def provider(self) -> str:
+        return "nexa"
+
+    def chat(self, **kwargs):  # pragma: no cover - llm_node is overridden
+        raise NotImplementedError("Nexa replies are produced by the ConversationRuntime")

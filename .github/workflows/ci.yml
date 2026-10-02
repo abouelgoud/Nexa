@@ -1,0 +1,45 @@
+name: CI
+on:
+  push:
+  pull_request:
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env: { POSTGRES_PASSWORD: postgres }
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - name: Install
+        run: pip install -e 'apps/api[dev]'
+      - name: Demo clinic database
+        env: { PGPASSWORD: postgres }
+        run: |
+          psql -h localhost -U postgres -c "CREATE DATABASE clinic_demo" -c "CREATE USER clinic_agent WITH PASSWORD 'clinic_agent'"
+          psql -h localhost -U postgres -d clinic_demo -v ON_ERROR_STOP=1 -f infrastructure/postgres/clinic_demo.sql
+          psql -h localhost -U postgres -d clinic_demo -c "GRANT USAGE ON SCHEMA clinic TO clinic_agent; GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA clinic TO clinic_agent; GRANT USAGE ON ALL SEQUENCES IN SCHEMA clinic TO clinic_agent;"
+      - name: Lint
+        run: cd apps/api && ruff check nexa tests scripts alembic ../worker ../../services
+      - name: Migrations are in sync with models
+        env: { DATABASE_URL: "postgresql+asyncpg://postgres:postgres@localhost:5432/postgres" }
+        run: cd apps/api && alembic upgrade head && alembic check
+      - name: Tests
+        run: cd apps/api && pytest -q
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build

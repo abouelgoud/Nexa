@@ -570,7 +570,7 @@ class ConversationRuntime:
         call = self.call
         if self.session.language:
             call.language = self.session.language
-        if self.session.dialect and self.session.dialect_confidence >= 0.3:
+        if self.session.dialect and self.session.dialect_confidence >= 0.2:
             call.dialect = self.session.dialect
         if result.intent:
             call.intent = call.intent or result.intent

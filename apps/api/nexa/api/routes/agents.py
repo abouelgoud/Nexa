@@ -199,6 +199,8 @@ async def setup_template(agent_id: UUID, body: TemplateSetupIn, ctx: TenantConte
         await ctx.db.flush()
         await save_graph(ctx, wf, WorkflowGraph.model_validate(graph_data))
         config["workflow_id"] = str(wf.id)
+        # Deterministic, works without a GPU; switch to "agent" mode in settings to let the LLM drive.
+        config["execution_mode"] = "workflow"
     config["tool_ids"] = tool_ids
     defn = svc.parse_definition(config)
     await svc.sync_agent_tools(ctx, agent, list(defn.tool_ids))

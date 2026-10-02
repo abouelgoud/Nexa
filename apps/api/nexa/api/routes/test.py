@@ -122,6 +122,24 @@ async def send_audio(session_id: UUID, file: UploadFile = File(...), voice: bool
     return {"transcript": tr.text, "stt_language": tr.language, "result": result.as_dict(), "audio": clips}
 
 
+@router.post("/realtime", status_code=201)
+async def start_realtime(body: TestSessionIn, ctx: TenantContext = Depends(require("test"))) -> dict[str, Any]:
+    """Real-time WebRTC test: returns a LiveKit room token; the voice runtime joins and runs the call."""
+    from nexa.providers.telephony.livekit_rooms import browser_test_room
+
+    agent = await get_agent(ctx, body.agent_id)
+    if body.use == "published":
+        if agent.published_version_id is None:
+            raise ValidationFailed("This agent has not been published yet. Test the draft instead.")
+        version = await ctx.db.get(AgentVersion, agent.published_version_id)
+    else:
+        version = await create_snapshot(ctx, agent, "test", "test snapshot")
+    await ctx.db.commit()
+    room = browser_test_room(f"tester-{ctx.user.id.hex[:8]}", {
+        "tenant_id": str(ctx.tenant_id), "agent_id": str(agent.id), "version_id": str(version.id)})
+    return {**room, "agent_version": {"id": str(version.id), "number": version.version_number, "kind": version.kind}}
+
+
 @router.post("/sessions/{session_id}/end")
 async def end_session(session_id: UUID, ctx: TenantContext = Depends(require("test"))) -> dict[str, Any]:
     rt = await _load(ctx, session_id)

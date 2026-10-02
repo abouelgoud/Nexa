@@ -1,0 +1,187 @@
+# Nexa local development stack.
+#
+#   docker compose up                          # platform + local STT/TTS + LiveKit (no GPU needed)
+#   docker compose --profile gpu up            # + vLLM serving Qwen3 (NVIDIA GPU)
+#   docker compose --profile cpu-llm up        # + Ollama serving Qwen3 on CPU (slow, for laptops)
+#   docker compose --profile sip up            # + LiveKit SIP for real phone numbers
+#   docker compose --profile monitoring up     # + Prometheus & Grafana
+#
+# Copy .env.example to .env first.
+
+x-api-env: &api-env
+  ENVIRONMENT: ${ENVIRONMENT:-development}
+  DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nexa}:${POSTGRES_PASSWORD:-nexa}@postgres:5432/${POSTGRES_DB:-nexa}
+  REDIS_URL: redis://redis:6379/0
+  JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY:-Wm9vX2RldmVsb3BtZW50X2tleV9kb19ub3RfdXNlXzE=}
+  CORS_ORIGINS: '["${WEB_ORIGIN:-http://localhost:3000}"]'
+  LOCAL_AI: ${LOCAL_AI:-true}
+  LLM_PROVIDER: ${LLM_PROVIDER:-local}
+  LLM_BASE_URL: ${LLM_BASE_URL:-http://llm:8000/v1}
+  LLM_MODEL: ${LLM_MODEL:-Qwen/Qwen3-8B}
+  LLM_API_KEY: ${LLM_API_KEY:-not-needed}
+  STT_PROVIDER: ${STT_PROVIDER:-whisper}
+  STT_BASE_URL: ${STT_BASE_URL:-http://stt:8001/v1}
+  TTS_PROVIDER: ${TTS_PROVIDER:-piper}
+  TTS_BASE_URL: ${TTS_BASE_URL:-http://tts:8002}
+  EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-hashing}
+  EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-http://embeddings:8003/v1}
+  EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-m3}
+  SIP_PROVIDER: ${SIP_PROVIDER:-livekit}
+  LIVEKIT_URL: ws://livekit:7880
+  LIVEKIT_API_URL: http://livekit:7880
+  LIVEKIT_PUBLIC_URL: ${LIVEKIT_PUBLIC_URL:-ws://localhost:7880}
+  LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
+  LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-devsecret_devsecret_devsecret_devsecret}
+  DEMO_CLINIC_DATABASE_URL: postgresql://clinic_agent:${CLINIC_DB_PASSWORD:-clinic_agent}@postgres:5432/clinic_demo
+  ALLOW_PRIVATE_NETWORK_INTEGRATIONS: ${ALLOW_PRIVATE_NETWORK_INTEGRATIONS:-true}
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-nexa}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nexa}
+      POSTGRES_DB: ${POSTGRES_DB:-nexa}
+      CLINIC_DB_PASSWORD: ${CLINIC_DB_PASSWORD:-clinic_agent}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init/01-extensions.sql:/docker-entrypoint-initdb.d/01-extensions.sql:ro
+      - ./infrastructure/postgres/init/02-clinic-demo.sh:/docker-entrypoint-initdb.d/02-clinic-demo.sh:ro
+      - ./infrastructure/postgres/clinic_demo.sql:/docker-entrypoint-initdb.d/clinic_demo.sql.in:ro
+    ports: ["${POSTGRES_PORT:-5432}:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nexa}"]
+      interval: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports: ["${REDIS_PORT:-6379}:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+
+  api:
+    build: { context: ., dockerfile: infrastructure/docker/api.Dockerfile }
+    environment: *api-env
+    ports: ["${API_PORT:-8000}:8000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  worker:
+    build: { context: ., dockerfile: infrastructure/docker/api.Dockerfile }
+    command: ["python", "-m", "nexa_worker.main"]
+    environment: *api-env
+    healthcheck: { disable: true }
+    depends_on:
+      api: { condition: service_healthy }
+
+  web:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/web.Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:8000}
+    ports: ["${WEB_PORT:-3000}:3000"]
+    depends_on: [api]
+
+  stt:
+    build: { context: services/stt }
+    environment:
+      WHISPER_MODEL: ${WHISPER_MODEL:-small}
+      WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
+      WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
+    volumes: [models:/models]
+    ports: ["8001:8001"]
+
+  tts:
+    build: { context: services/tts }
+    environment:
+      PIPER_VOICES: ${PIPER_VOICES:-ar_JO-kareem-medium,en_US-amy-medium}
+    volumes: [models:/models]
+    ports: ["8002:8002"]
+
+  livekit:
+    image: livekit/livekit-server:v1.9
+    command: ["--config", "/etc/livekit.yaml"]
+    volumes: ["./infrastructure/livekit/livekit.yaml:/etc/livekit.yaml:ro"]
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "50000-50100:50000-50100/udp"
+    depends_on: [redis]
+
+  voice-runtime:
+    build: { context: ., dockerfile: infrastructure/docker/voice.Dockerfile }
+    environment: *api-env
+    depends_on: [livekit, api, stt, tts]
+
+  # ---- optional profiles --------------------------------------------------------------------
+
+  llm:
+    profiles: ["gpu"]
+    image: vllm/vllm-openai:latest
+    command: >
+      --model ${LLM_MODEL:-Qwen/Qwen3-8B}
+      --served-model-name ${LLM_MODEL:-Qwen/Qwen3-8B}
+      --enable-auto-tool-choice --tool-call-parser hermes
+      --max-model-len ${LLM_MAX_MODEL_LEN:-8192}
+      --gpu-memory-utilization ${LLM_GPU_MEMORY_UTILIZATION:-0.9}
+    environment:
+      HUGGING_FACE_HUB_TOKEN: ${HF_TOKEN:-}
+    volumes: [hf-cache:/root/.cache/huggingface]
+    ports: ["8010:8000"]
+    ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices: [{ driver: nvidia, count: all, capabilities: [gpu] }]
+
+  ollama:
+    profiles: ["cpu-llm"]
+    image: ollama/ollama:latest
+    volumes: [ollama:/root/.ollama]
+    ports: ["11434:11434"]
+
+  livekit-sip:
+    profiles: ["sip"]
+    image: livekit/sip:latest
+    environment:
+      SIP_CONFIG_BODY: |
+        api_key: ${LIVEKIT_API_KEY:-devkey}
+        api_secret: ${LIVEKIT_API_SECRET:-devsecret_devsecret_devsecret_devsecret}
+        ws_url: ws://livekit:7880
+        redis:
+          address: redis:6379
+        sip_port: 5060
+        rtp_port: 10000-10100
+        use_external_ip: true
+    ports:
+      - "5060:5060/udp"
+      - "5060:5060/tcp"
+      - "10000-10100:10000-10100/udp"
+    depends_on: [livekit, redis]
+
+  prometheus:
+    profiles: ["monitoring"]
+    image: prom/prometheus:latest
+    volumes: ["./infrastructure/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro"]
+    ports: ["9090:9090"]
+
+  grafana:
+    profiles: ["monitoring"]
+    image: grafana/grafana:latest
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes: ["./infrastructure/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro"]
+    ports: ["3001:3000"]
+
+volumes:
+  pgdata:
+  models:
+  hf-cache:
+  ollama:

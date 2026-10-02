@@ -31,6 +31,7 @@ def call_summary(c: Call) -> dict[str, Any]:
 
 @router.get("/calls")
 async def list_calls(agent_id: UUID | None = None, status: str | None = None, channel: str | None = None,
+                     external_id: str | None = None,
                      include_tests: bool = True, limit: int = Query(50, le=200), offset: int = 0,
                      ctx: TenantContext = Depends(get_tenant_context)) -> list[dict[str, Any]]:
     q = select(Call).where(Call.tenant_id == ctx.tenant_id)
@@ -40,6 +41,8 @@ async def list_calls(agent_id: UUID | None = None, status: str | None = None, ch
         q = q.where(Call.status == status)
     if channel:
         q = q.where(Call.channel == channel)
+    if external_id:
+        q = q.where(Call.external_id == external_id)
     if not include_tests:
         q = q.where(Call.is_test.is_(False))
     rows = await ctx.db.scalars(q.order_by(Call.started_at.desc()).limit(limit).offset(offset))

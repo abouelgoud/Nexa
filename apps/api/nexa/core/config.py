@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     sip_provider: Literal["livekit", "none"] = "livekit"
     livekit_url: str = "ws://livekit:7880"
     livekit_api_url: str = "http://livekit:7880"
+    # URL browsers use to reach LiveKit (WebRTC signalling).
+    livekit_public_url: str = "ws://localhost:7880"
     livekit_api_key: str = "devkey"
     livekit_api_secret: str = "devsecret_devsecret_devsecret_devsecret"
 
