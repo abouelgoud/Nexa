@@ -68,9 +68,16 @@ if [ "$USE_BREW" = 1 ]; then
   }
 
   brew_install pgvector
-  # pgvector is built for specific PostgreSQL versions: use the newest one it supports.
-  PG_FORMULA="$(brew deps --direct pgvector | grep -E '^postgresql@[0-9]+$' | sort -t@ -k2 -n | tail -1 || true)"
-  [ -n "$PG_FORMULA" ] || die "Could not find which PostgreSQL version pgvector supports (brew deps pgvector)."
+  # pgvector is built for specific PostgreSQL versions (it ships lib/postgresql@NN for each one). Use one you
+  # already have if possible, otherwise the newest it supports.
+  PG_SUPPORTED="$( (ls -d "$(brew --prefix pgvector)"/lib/postgresql@* 2>/dev/null | xargs -n1 basename 2>/dev/null;
+                    brew deps --include-build --direct pgvector 2>/dev/null) | grep -E '^postgresql@[0-9]+$' | sort -u -t@ -k2 -n || true)"
+  [ -n "$PG_SUPPORTED" ] || die "Could not find which PostgreSQL version pgvector supports (brew info pgvector)."
+  PG_FORMULA=""
+  for formula in $PG_SUPPORTED; do
+    if brew list --formula "$formula" >/dev/null 2>&1; then PG_FORMULA="$formula"; fi
+  done
+  [ -n "$PG_FORMULA" ] || PG_FORMULA="$(echo "$PG_SUPPORTED" | tail -1)"
   brew_install "$PG_FORMULA"
   brew_install python@3.12
   command -v node >/dev/null 2>&1 || brew_install node
