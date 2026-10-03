@@ -68,7 +68,9 @@ LIGHT = os.getenv("VOICE_LIGHT", "0") == "1"
 _light_options = {"job_executor_type": JobExecutorType.THREAD, "num_idle_processes": 0} if LIGHT else {}
 
 server = AgentServer(ws_url=s.livekit_url, api_key=s.livekit_api_key, api_secret=s.livekit_api_secret,
-                     http_proxy=livekit_proxy(s.livekit_url), **({"load_fnc": calls_load} if MAX_CALLS > 0 else {}),
+                     http_proxy=livekit_proxy(s.livekit_url),
+                     # Full only when every call slot is taken (LiveKit's default refuses calls above 70% load).
+                     **({"load_fnc": calls_load, "load_threshold": 1.0} if MAX_CALLS > 0 else {}),
                      **_light_options)
 
 

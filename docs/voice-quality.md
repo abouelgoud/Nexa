@@ -79,6 +79,26 @@ Where the time goes is shown per turn on the call page ("recognized in", "answer
   voice (Piper) is the fastest. When checking takes longer than 0.9 s the agent says "لحظة من فضلك" instead of
   staying silent.
 
+## Docker (`docker compose up`, measured)
+
+Every service has a memory cap, so the stack can't grow beyond about 8.5 GB even under load. Measured after a live
+call:
+
+| Service | In use | Cap |
+|---|---|---|
+| `llm` (llama.cpp, Qwen2.5 3B) | 1.8 GB | 3 GB (`LLM_MEMORY`) |
+| `stt` (Whisper small) | 0.7 GB | 2 GB (`STT_MEMORY`) |
+| `tts` (Piper) | 0.4 GB | 768 MB |
+| `voice-runtime` (calls as threads) | 0.4 GB | 1 GB |
+| `api`, `web`, `postgres`, `livekit`, `redis` | 0.3 GB together | |
+| **Total** | **~3.6 GB** | |
+
+Per turn (live call, same test machine): recognition 5-8 s for ~5 s of speech, reply decided in 0.2 s, voice
+starting 0.3-0.8 s later. On a CPU, recognition is the slow step: it uses every core (`WHISPER_CPU_THREADS`), and
+the options to make it faster are a cloud recogniser (ElevenLabs Scribe / Azure, see above) or, on a Mac, running
+`scripts/dev-mac.sh`, which uses the Apple GPU. Docker on a Mac can't use the GPU. Likewise for the LLM: a native
+Ollama on the Mac (`LLM_BASE_URL=http://host.docker.internal:11434/v1`) is faster than the container.
+
 ## Memory (scripts/dev-mac.sh, measured)
 
 | | Default | `--small-pc` |

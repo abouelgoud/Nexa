@@ -13,9 +13,14 @@ The first template is **doctor appointment booking**, but the runtime is generic
 
 ```bash
 cp .env.example .env
-docker compose up --build                  # web :3000, API :8000 (OpenAPI at /docs), LiveKit :7880
-docker compose --profile gpu up --build    # + vLLM serving Qwen3 for "AI decides" (agent) mode
+docker compose up -d --build               # web :3000, API :8000 (OpenAPI at /docs), LiveKit :7880
 ```
+
+Everything runs in Docker: database, API, web app, local LLM (llama.cpp + Qwen2.5 3B), speech recognition
+(Whisper small), voices (Piper), LiveKit and the live-call worker. It is sized for an ordinary laptop: about
+4-5 GB of memory in use, with a memory cap on every service so it can't grow beyond that. The first start downloads
+the models (about 3 GB). See `docs/voice-quality.md` for speed, accuracy and memory options (e.g. a native LLM on a
+Mac's GPU, larger Whisper, cloud speech), and `docker compose --profile gpu up` for vLLM on an NVIDIA GPU.
 
 Then open http://localhost:3000 and:
 
@@ -33,8 +38,7 @@ Then open http://localhost:3000 and:
 9. **Phone**: connect a number from a SIP carrier to call the agent from a real phone (see `docs/telephony.md`).
 10. Create another agent (e.g. *Restaurant reservations*) - no code.
 
-Workflow mode runs fully without an LLM; agent mode (LLM chooses actions) needs the `gpu` (vLLM) or `cpu-llm`
-(Ollama) profile.
+Workflow mode runs fully without an LLM; agent mode (LLM chooses actions) uses the bundled `llm` service.
 
 ### Local development without Docker
 

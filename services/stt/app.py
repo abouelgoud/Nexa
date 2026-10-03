@@ -25,6 +25,8 @@ COMPUTE = os.getenv("WHISPER_COMPUTE_TYPE", "default")
 # Greedy decoding (1) is as accurate as beam search (5) on our Arabic call tests and ~30% faster.
 BEAM = int(os.getenv("WHISPER_BEAM_SIZE", "5"))
 ENGINE = os.getenv("WHISPER_ENGINE", "auto")
+# faster-whisper uses 4 CPU threads unless told otherwise; use every core (recognition is the slowest step on a CPU).
+CPU_THREADS = int(os.getenv("WHISPER_CPU_THREADS", "0")) or max(4, os.cpu_count() or 4)
 MLX_MODELS = {"large-v3-turbo": "mlx-community/whisper-large-v3-turbo", "large-v3": "mlx-community/whisper-large-v3-mlx",
               "small": "mlx-community/whisper-small-mlx"}
 MODEL_DIR = os.getenv("WHISPER_MODEL_DIR", "/models/whisper")
@@ -47,8 +49,10 @@ def model() -> WhisperModel:
     global _model
     if _model is None:
         start = time.perf_counter()
-        _model = WhisperModel(MODEL, device=DEVICE, compute_type=COMPUTE, download_root=MODEL_DIR)
-        log.warning("loaded whisper %s (faster-whisper, %s) in %.1fs", MODEL, DEVICE, time.perf_counter() - start)
+        _model = WhisperModel(MODEL, device=DEVICE, compute_type=COMPUTE, download_root=MODEL_DIR,
+                              cpu_threads=CPU_THREADS)
+        log.warning("loaded whisper %s (faster-whisper, %s, %d threads) in %.1fs", MODEL, DEVICE, CPU_THREADS,
+                    time.perf_counter() - start)
     return _model
 
 

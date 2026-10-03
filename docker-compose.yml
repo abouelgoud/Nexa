@@ -1,14 +1,18 @@
-# Nexa local development stack.
+# Nexa - everything in Docker, light by default (about 4-5 GB of memory in use, every service capped).
 #
-#   docker compose up                          # platform + local STT/TTS + LiveKit (no GPU needed)
-#   docker compose --profile gpu up            # + vLLM serving Qwen3 (NVIDIA GPU)
-#   docker compose --profile cpu-llm up        # + Ollama serving Qwen3 on CPU (slow, for laptops)
-#   docker compose --profile neural up         # + natural self-hosted voices with cloning (NVIDIA GPU)
-#   Mac without NVIDIA: scripts/voice-mac.sh, and NEURAL_TTS_BASE_URL=http://host.docker.internal:8004 in .env
-#   docker compose --profile sip up            # + LiveKit SIP for real phone numbers
-#   docker compose --profile monitoring up     # + Prometheus & Grafana
+#   docker compose up -d --build                # web :3000, API :8000, LiveKit :7880, local LLM, speech, voices
+#   docker compose --profile worker up -d       # + background worker (only needed at scale; jobs run in the API)
+#   docker compose --profile gpu up -d          # + vLLM (NVIDIA GPU); set LLM_BASE_URL=http://llm-gpu:8000/v1
+#   docker compose --profile neural up -d       # + natural voices with cloning (NVIDIA GPU)
+#   docker compose --profile sip up -d          # + LiveKit SIP for real phone numbers
+#   docker compose --profile monitoring up -d   # + Prometheus & Grafana
 #
-# Copy .env.example to .env first.
+# On a Mac, Docker can't use the GPU, so models run on the CPU. For faster replies, run the LLM natively instead
+# (it then uses the Apple GPU): `ollama serve` + `ollama pull qwen2.5:3b`, and in .env:
+#   LLM_BASE_URL=http://host.docker.internal:11434/v1
+# Natural/cloned voices on a Mac: scripts/voice-mac.sh and NEURAL_TTS_BASE_URL=http://host.docker.internal:8004.
+#
+# Copy .env.example to .env first (optional).
 
 x-api-env: &api-env
   ENVIRONMENT: ${ENVIRONMENT:-development}
@@ -19,8 +23,8 @@ x-api-env: &api-env
   CORS_ORIGINS: '["${WEB_ORIGIN:-http://localhost:3000}"]'
   LOCAL_AI: ${LOCAL_AI:-true}
   LLM_PROVIDER: ${LLM_PROVIDER:-local}
-  LLM_BASE_URL: ${LLM_BASE_URL:-http://llm:8000/v1}
-  LLM_MODEL: ${LLM_MODEL:-Qwen/Qwen3-8B}
+  LLM_BASE_URL: ${LLM_BASE_URL:-http://llm:8080/v1}
+  LLM_MODEL: ${LLM_MODEL:-qwen2.5:3b}
   LLM_API_KEY: ${LLM_API_KEY:-not-needed}
   STT_PROVIDER: ${STT_PROVIDER:-whisper}
   STT_BASE_URL: ${STT_BASE_URL:-http://stt:8001/v1}
@@ -42,6 +46,7 @@ x-api-env: &api-env
   LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
   LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-devsecret_devsecret_devsecret_devsecret}
   DEMO_CLINIC_DATABASE_URL: postgresql://clinic_agent:${CLINIC_DB_PASSWORD:-clinic_agent}@postgres:5432/clinic_demo
+  JOBS_INLINE: ${JOBS_INLINE:-true}            # documents are processed in the API (no worker needed)
   ALLOW_PRIVATE_NETWORK_INTEGRATIONS: ${ALLOW_PRIVATE_NETWORK_INTEGRATIONS:-true}
   OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
 
@@ -63,24 +68,32 @@ services:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nexa}"]
       interval: 5s
       retries: 20
+    mem_limit: 512m
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
+    command: ["redis-server", "--maxmemory", "48mb", "--save", ""]
     ports: ["${REDIS_PORT:-6379}:6379"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
+    mem_limit: 64m
+    restart: unless-stopped
 
   api:
     build: { context: ., dockerfile: infrastructure/docker/api.Dockerfile }
     environment: *api-env
     ports: ["${API_PORT:-8000}:8000"]
-    extra_hosts: ["host.docker.internal:host-gateway"]  # reach a voice service running natively (voice-mac.sh)
+    extra_hosts: ["host.docker.internal:host-gateway"]  # reach an LLM / voice service running natively
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+    mem_limit: 512m
+    restart: unless-stopped
 
   worker:
+    profiles: ["worker"]
     build: { context: ., dockerfile: infrastructure/docker/api.Dockerfile }
     command: ["python", "-m", "nexa_worker.main"]
     environment: *api-env
@@ -98,15 +111,21 @@ services:
         NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:-}
     ports: ["${WEB_PORT:-3000}:3000"]
     depends_on: [api]
+    mem_limit: 384m
+    restart: unless-stopped
 
   stt:
     build: { context: services/stt }
     environment:
+      # small: 17.8% word errors on our Arabic call tests, ~1.3 GB. large-v3-turbo: 13.4%, ~2.1 GB (raise STT_MEMORY).
       WHISPER_MODEL: ${WHISPER_MODEL:-small}
       WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
       WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
+      WHISPER_BEAM_SIZE: ${WHISPER_BEAM_SIZE:-1}   # as accurate as beam search on call audio, and faster
     volumes: [models:/models]
     ports: ["8001:8001"]
+    mem_limit: ${STT_MEMORY:-2g}
+    restart: unless-stopped
 
   tts:
     build: { context: services/tts }
@@ -114,6 +133,8 @@ services:
       PIPER_VOICES: ${PIPER_VOICES:-ar_JO-kareem-medium,en_US-amy-medium}
     volumes: [models:/models]
     ports: ["8002:8002"]
+    mem_limit: 768m
+    restart: unless-stopped
 
   livekit:
     image: livekit/livekit-server:v1.13  # v1.9 drops browser calls with current LiveKit SDKs
@@ -124,21 +145,47 @@ services:
       - "7881:7881"
       - "50000-50100:50000-50100/udp"
     depends_on: [redis]
+    mem_limit: 256m
+    restart: unless-stopped
 
   voice-runtime:
     build: { context: ., dockerfile: infrastructure/docker/voice.Dockerfile }
-    environment: *api-env
+    environment:
+      <<: *api-env
+      VOICE_LIGHT: "1"                          # calls run as threads in one process (not a process per call)
+      VOICE_MAX_CALLS: ${VOICE_MAX_CALLS:-4}   # capacity in calls, not CPU load (a busy CPU must not refuse calls)
     extra_hosts: ["host.docker.internal:host-gateway"]
     depends_on: [livekit, api, stt, tts]
+    mem_limit: 1g
+    restart: unless-stopped
+
+  # Local LLM: llama.cpp's server (small CPU image) with Qwen2.5 3B. It got all of our Arabic call checks right
+  # (booking tool call, answers from clinic information, intents); the model (~2 GB) downloads on first start.
+  llm:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    command: >
+      -hf ${LLM_HF_MODEL:-Qwen/Qwen2.5-3B-Instruct-GGUF:q4_k_m}
+      --alias ${LLM_MODEL:-qwen2.5:3b} --jinja -c 4096 -np 1 --host 0.0.0.0 --port 8080
+    environment:
+      LLAMA_CACHE: /models
+    volumes: [llm-models:/models]
+    ports: ["8010:8080"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 10s
+      retries: 60
+      start_period: 30s
+    mem_limit: ${LLM_MEMORY:-3g}
+    restart: unless-stopped
 
   # ---- optional profiles --------------------------------------------------------------------
 
-  llm:
+  llm-gpu:
     profiles: ["gpu"]
     image: vllm/vllm-openai:latest
     command: >
-      --model ${LLM_MODEL:-Qwen/Qwen3-8B}
-      --served-model-name ${LLM_MODEL:-Qwen/Qwen3-8B}
+      --model ${VLLM_MODEL:-Qwen/Qwen3-8B}
+      --served-model-name ${VLLM_MODEL:-Qwen/Qwen3-8B}
       --enable-auto-tool-choice --tool-call-parser hermes
       --max-model-len ${LLM_MAX_MODEL_LEN:-8192}
       --gpu-memory-utilization ${LLM_GPU_MEMORY_UTILIZATION:-0.9}
@@ -162,18 +209,14 @@ services:
     environment:
       TTS_ENGINES: neural
       NEURAL_DEVICE: cuda
+      NEURAL_PRELOAD: "false"        # loads when a natural/cloned voice is used,
+      NEURAL_IDLE_MINUTES: "10"      # and frees its memory after 10 idle minutes
     volumes: [models:/models]
     ports: ["8004:8002"]
     deploy:
       resources:
         reservations:
           devices: [{ driver: nvidia, count: all, capabilities: [gpu] }]
-
-  ollama:
-    profiles: ["cpu-llm"]
-    image: ollama/ollama:latest
-    volumes: [ollama:/root/.ollama]
-    ports: ["11434:11434"]
 
   livekit-sip:
     profiles: ["sip"]
@@ -213,4 +256,4 @@ volumes:
   pgdata:
   models:
   hf-cache:
-  ollama:
+  llm-models:
