@@ -2,7 +2,7 @@
 
 import type { AudioClip, TestSession, TurnResult } from "@nexa/shared-types";
 import { Alert, Badge, Button, Card, CardContent, CardHeader, CardTitle, Input, Select, Spinner, cn } from "@nexa/ui";
-import { Mic, PhoneOff, Send, Square } from "lucide-react";
+import { Mic, PhoneOff, Send, Square, Volume2 } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -15,27 +15,59 @@ import { toWav16k } from "@/lib/wav";
 
 type Line = { role: "agent" | "caller"; text: string };
 
+/** A short silent WAV, played on a click so the browser lets the same player speak later (Safari requires this). */
+function silentWav(): string {
+  const samples = 800, view = new DataView(new ArrayBuffer(44 + samples * 2));
+  const text = (o: number, t: string) => [...t].forEach((c, i) => view.setUint8(o + i, c.charCodeAt(0)));
+  text(0, "RIFF"); view.setUint32(4, 36 + samples * 2, true); text(8, "WAVE"); text(12, "fmt ");
+  view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+  view.setUint32(24, 16000, true); view.setUint32(28, 32000, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+  text(36, "data"); view.setUint32(40, samples * 2, true);
+  return URL.createObjectURL(new Blob([view], { type: "audio/wav" }));
+}
+
 function useAudioQueue() {
   const queue = useRef<string[]>([]);
-  const current = useRef<HTMLAudioElement | null>(null);
+  const player = useRef<HTMLAudioElement | null>(null);
+  const playing = useRef(false);
+  const [blocked, setBlocked] = useState(false);
+  const element = () => (player.current ??= new Audio());
   const playNext = () => {
     const src = queue.current.shift();
-    if (!src) { current.current = null; return; }
-    const a = new Audio(src);
-    current.current = a;
+    if (!src) { playing.current = false; return; }
+    playing.current = true;
+    const a = element();
     a.onended = playNext;
-    a.play().catch(playNext);
+    a.src = src;
+    a.play().then(() => setBlocked(false)).catch((e: DOMException) => {
+      if (e.name === "NotAllowedError") {  // the browser wants a click first: keep the clip, offer a button
+        queue.current.unshift(src);
+        playing.current = false;
+        setBlocked(true);
+      } else playNext();
+    });
   };
   return {
+    blocked,
+    /** Call at the start of a click handler, before any await: lets this page play the agent's replies. */
+    unlock() {
+      if (playing.current) return;
+      const a = element();
+      a.onended = null;
+      a.src = silentWav();
+      a.play().catch(() => undefined);
+    },
     enqueue(clips: AudioClip[]) {
       clips.filter((c) => c.audio_base64).forEach((c) => queue.current.push(`data:${c.mime_type ?? "audio/wav"};base64,${c.audio_base64}`));
-      if (!current.current) playNext();
+      if (!playing.current) playNext();
     },
+    /** From the "play" button: a fresh click, so the browser allows it. */
+    resume() { setBlocked(false); playNext(); },
     /** Barge-in: the caller started speaking, stop the agent immediately. */
     stop() {
       queue.current = [];
-      current.current?.pause();
-      current.current = null;
+      player.current?.pause();
+      playing.current = false;
     },
   };
 }
@@ -113,6 +145,7 @@ export default function TestPage() {
   };
 
   const start = async () => {
+    if (voice) audio.unlock();
     setBusy(true); setError(null); setLines([]); setLast(null); setEnded(false); setIntent(null);
     try {
       const s = await post<TestSession>(`/test/sessions?voice=${voice}`, { agent_id: id, use });
@@ -124,7 +157,9 @@ export default function TestPage() {
   const sendText = async () => {
     if (!session || !text.trim()) return;
     const t = text;
-    setText(""); setBusy(true); setError(null); audio.stop();
+    audio.stop();
+    if (voice) audio.unlock();
+    setText(""); setBusy(true); setError(null);
     try {
       const r = await post<{ result: TurnResult; audio: AudioClip[] }>(`/test/sessions/${session.session_id}/messages?voice=${voice}`, { text: t });
       apply(r.result, r.audio, t);
@@ -133,6 +168,7 @@ export default function TestPage() {
 
   const startRecording = async () => {
     audio.stop();
+    if (voice) audio.unlock();
     setError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
@@ -214,6 +250,11 @@ export default function TestPage() {
             <div ref={bottom} />
           </div>
           <ErrorBox error={error} />
+          {audio.blocked && (
+            <Button variant="outline" className="w-full" onClick={audio.resume}>
+              <Volume2 className="h-4 w-4" /> Your browser paused the sound - play the agent&apos;s voice
+            </Button>
+          )}
           <div className="flex gap-2">
             <Button variant={recording ? "destructive" : "outline"} size="icon" disabled={!connected || (busy && !recording)}
               onPointerDown={startRecording} onPointerUp={stopRecording} onPointerLeave={() => recording && stopRecording()}

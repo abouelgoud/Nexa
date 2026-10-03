@@ -2,7 +2,7 @@
 
 import type { CallDetail, CallSummary } from "@nexa/shared-types";
 import { Alert, Badge, Button, Card, CardContent, CardHeader, CardTitle, cn } from "@nexa/ui";
-import { PhoneOff, Radio } from "lucide-react";
+import { PhoneOff, Radio, Volume2 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
@@ -10,7 +10,7 @@ import { ErrorBox } from "@/components/error-box";
 import { get, post } from "@/lib/api";
 import { dialectName } from "@/lib/format";
 
-type RoomLike = { disconnect: () => Promise<void> };
+type RoomLike = { disconnect: () => Promise<void>; startAudio: () => Promise<void>; canPlaybackAudio: boolean };
 
 /**
  * Real-time WebRTC test through LiveKit: the browser publishes the microphone, the Nexa voice runtime
@@ -25,6 +25,7 @@ export function RealtimeTest({ agentId, use }: { agentId: string; use: "draft" |
   const [status, setStatus] = useState("idle");
   const [agentJoined, setAgentJoined] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const [audioBlocked, setAudioBlocked] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const audioHost = useRef<HTMLDivElement>(null);
 
@@ -68,10 +69,14 @@ export function RealtimeTest({ agentId, use }: { agentId: string; use: "draft" |
         if (track.kind === Track.Kind.Audio) audioHost.current?.appendChild(track.attach());
       });
       r.on(RoomEvent.Disconnected, () => setStatus("ended"));
+      // Browsers (Safari especially) hold back audio that starts after the click; offer a button then.
+      r.on(RoomEvent.AudioPlaybackStatusChanged, () => setAudioBlocked(!r.canPlaybackAudio));
       r.on(RoomEvent.ParticipantConnected, (p) => {
         if (p.isAgent) { setAgentJoined(true); setProblem(null); }
       });
       await r.connect(info.url, info.token);
+      await r.startAudio().catch(() => undefined);
+      setAudioBlocked(!r.canPlaybackAudio);
       if ([...r.remoteParticipants.values()].some((p) => p.isAgent)) setAgentJoined(true);
       try {
         await r.localParticipant.setMicrophoneEnabled(true);
@@ -109,6 +114,12 @@ export function RealtimeTest({ agentId, use }: { agentId: string; use: "draft" |
             </p>
           )}
           {problem && <Alert variant="warning">{problem}</Alert>}
+          {status === "connected" && audioBlocked && (
+            <Button variant="outline" className="w-full"
+              onClick={() => room?.startAudio().then(() => setAudioBlocked(!room.canPlaybackAudio)).catch(() => undefined)}>
+              <Volume2 className="h-4 w-4" /> Your browser paused the sound - click to hear the agent
+            </Button>
+          )}
           <ErrorBox error={error} />
           <div className="h-[380px] space-y-2 overflow-y-auto rounded-lg bg-muted/40 p-3">
             {detail?.messages.map((m) => (
