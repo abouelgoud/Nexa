@@ -41,24 +41,25 @@ class OpenAICompatibleLLM(LLMProvider):
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.disable_thinking = disable_thinking
+        # Ollama only switches reasoning off with reasoning_effort="none" (it ignores chat_template_kwargs and
+        # /no_think); servers that reject that value get it dropped after the first refusal.
+        self._reasoning_off = disable_thinking
         self._client = httpx.AsyncClient(
             timeout=timeout, headers={"Authorization": f"Bearer {api_key}"}, transport=transport
         )
 
     def _payload(self, messages: list[ChatMessage], temperature, max_tokens, **extra) -> dict[str, Any]:
-        wire = [m.to_openai() for m in messages]
-        if self.disable_thinking and "qwen3" in self.model.lower() and wire and wire[0]["role"] == "system":
-            # Qwen3's own switch: works on every server (Ollama ignores chat_template_kwargs below).
-            wire[0] = {**wire[0], "content": f"{wire[0]['content']}\n/no_think"}
         payload: dict[str, Any] = {
             "model": self.model,
-            "messages": wire,
+            "messages": [m.to_openai() for m in messages],
             "temperature": self.temperature if temperature is None else temperature,
             "max_tokens": max_tokens or self.max_tokens,
         }
         if self.disable_thinking:
             # Honoured by vLLM for Qwen3 chat templates; ignored by other servers.
             payload["chat_template_kwargs"] = {"enable_thinking": False}
+        if self._reasoning_off:
+            payload["reasoning_effort"] = "none"
         payload.update({k: v for k, v in extra.items() if v is not None})
         return payload
 
@@ -68,6 +69,10 @@ class OpenAICompatibleLLM(LLMProvider):
             r = await self._client.post(f"{self.base_url}/chat/completions", json=payload)
         except httpx.HTTPError as exc:
             raise LLMError(f"LLM server unreachable: {exc}") from exc
+        if r.status_code in (400, 422) and "reasoning_effort" in payload and "reasoning" in r.text.lower():
+            self._reasoning_off = False  # this server doesn't accept it; it uses chat_template_kwargs instead
+            payload = {k: v for k, v in payload.items() if k != "reasoning_effort"}
+            return await self._post(payload)
         if r.status_code >= 400:
             raise LLMError(f"LLM server error {r.status_code}: {r.text[:300]}")
         return r.json(), (time.perf_counter() - start) * 1000

@@ -4,7 +4,7 @@
 #   scripts/dev-mac.sh                          everything: database, API, web app, local LLM (Ollama + Qwen3),
 #                                               speech recognition (Whisper), voices (Piper + natural voices with
 #                                               cloning on the Apple Silicon GPU), LiveKit and the live-call worker
-#   scripts/dev-mac.sh --llm qwen3:4b           smaller model for Macs with 8-16 GB of memory (default qwen3:8b)
+#   scripts/dev-mac.sh --llm qwen3:8b           larger LLM, roughly half as fast (default qwen3:4b-instruct)
 #   scripts/dev-mac.sh --voice-model omnivoice  natural voices with OmniVoice instead of Chatterbox (non-commercial)
 #   scripts/dev-mac.sh --no-llm                 use an LLM you run elsewhere (set LLM_BASE_URL / LLM_MODEL)
 #   scripts/dev-mac.sh --no-voice               skip speech and live calls (text testing only, starts fastest)
@@ -27,7 +27,9 @@ TTS_PORT=8002
 NEURAL_PORT=8004
 LIVEKIT_PORT=7880
 OLLAMA_PORT=11434
-LLM="${LLM:-qwen3:8b}"
+# Fast and accurate enough for calls (it got all our Arabic booking/answer/intent checks right; the 0.6b/1.7b
+# models did not). "instruct" = no hidden reasoning pass, which a phone call can't wait for.
+LLM="${LLM:-qwen3:4b-instruct}"
 VOICE_MODEL="${VOICE_MODEL:-chatterbox}"
 SETUP_ONLY=0
 USE_BREW=1
@@ -39,7 +41,7 @@ while [ $# -gt 0 ]; do
     --no-brew) USE_BREW=0 ;;
     --no-llm) WITH_LLM=0 ;;
     --no-voice) WITH_VOICE=0 ;;
-    --llm) LLM="${2:?--llm needs a model name, e.g. qwen3:8b}"; shift ;;
+    --llm) LLM="${2:?--llm needs a model name, e.g. qwen3:4b-instruct}"; shift ;;
     --llm=*) LLM="${1#--llm=}" ;;
     --voice-model) VOICE_MODEL="${2:?--voice-model needs chatterbox or omnivoice}"; shift ;;
     --voice-model=*) VOICE_MODEL="${1#--voice-model=}" ;;

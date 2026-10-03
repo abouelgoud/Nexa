@@ -37,20 +37,25 @@ async def test_tool_calls_parsed_and_thinking_disabled():
     assert seen[0]["tool_choice"] == "auto"
 
 
-async def test_qwen3_thinking_switched_off_on_any_server():
-    """Ollama ignores chat_template_kwargs, so Qwen3's own /no_think switch goes in the system prompt."""
+async def test_reasoning_switched_off_for_ollama_and_dropped_where_refused():
+    """Ollama ignores chat_template_kwargs; reasoning_effort="none" is what stops Qwen3 thinking there.
+    A server that refuses the value (e.g. some vLLM versions) gets it dropped, once."""
     seen = []
 
     def handler(req: httpx.Request):
-        seen.append(json.loads(req.content))
+        body = json.loads(req.content)
+        seen.append(body)
+        if body.get("reasoning_effort") == "none" and len(seen) >= 2:
+            return httpx.Response(400, json={"error": "reasoning_effort must be one of low, medium, high"})
         return httpx.Response(200, json={"choices": [{"message": {"content": "أهلاً"}}], "usage": {}})
 
-    for model in ("qwen3:8b", "llama3.1"):
-        llm = OpenAICompatibleLLM("http://localhost:11434/v1", model, transport=httpx.MockTransport(handler))
-        await llm.generate([ChatMessage("system", "You are a receptionist."), ChatMessage("user", "مرحبا")])
-    assert seen[0]["messages"][0]["content"] == "You are a receptionist.\n/no_think"
-    assert seen[0]["messages"][1]["content"] == "مرحبا"
-    assert seen[1]["messages"][0]["content"] == "You are a receptionist."  # other models untouched
+    llm = OpenAICompatibleLLM("http://localhost:11434/v1", "qwen3:4b", transport=httpx.MockTransport(handler))
+    assert (await llm.generate([ChatMessage("user", "مرحبا")])).content == "أهلاً"
+    assert seen[0]["reasoning_effort"] == "none" and seen[0]["chat_template_kwargs"] == {"enable_thinking": False}
+    assert (await llm.generate([ChatMessage("user", "مرحبا")])).content == "أهلاً"  # refused, then retried without
+    assert "reasoning_effort" not in seen[2]
+    await llm.generate([ChatMessage("user", "مرحبا")])
+    assert len(seen) == 4 and "reasoning_effort" not in seen[3]  # remembered
 
 
 async def test_hidden_reasoning_never_returned():

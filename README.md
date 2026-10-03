@@ -39,13 +39,13 @@ Workflow mode runs fully without an LLM; agent mode (LLM chooses actions) needs 
 ### Local development without Docker
 
 On macOS, one command runs the **whole platform natively, without Docker**: it installs what's missing (Homebrew),
-creates the databases and starts the API, web app, local LLM (Ollama + Qwen3, on the Apple Silicon GPU), speech
+creates the databases and starts the API, web app, local LLM (Ollama + Qwen3 4B, on the Apple Silicon GPU), speech
 recognition (Whisper), voices (Piper, plus natural voices with cloning on the Apple Silicon GPU), LiveKit and the
 live-call worker:
 
 ```bash
 scripts/dev-mac.sh                          # then open http://localhost:3000; Ctrl+C stops everything
-scripts/dev-mac.sh --llm qwen3:4b           # smaller LLM for Macs with 8-16 GB of memory
+scripts/dev-mac.sh --llm qwen3:8b           # larger LLM (default qwen3:4b-instruct is half the size, so roughly twice as fast)
 scripts/dev-mac.sh --voice-model omnivoice  # OmniVoice natural voices (non-commercial weights)
 scripts/dev-mac.sh --no-voice               # text testing only (fastest start)
 ```

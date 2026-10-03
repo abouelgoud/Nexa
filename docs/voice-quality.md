@@ -70,7 +70,11 @@ Where the time goes is shown per turn on the call page ("recognized in", "answer
   errors) and ~30% faster. If it's still slow on an older Mac: `WHISPER_MODEL=small scripts/dev-mac.sh` (faster,
   less accurate).
 * **LLM**: `scripts/dev-mac.sh` loads the model at startup and keeps it in memory (Ollama otherwise unloads it after
-  5 idle minutes and the next caller waits while it reloads). Smaller model: `--llm qwen3:4b`.
+  5 idle minutes and the next caller waits while it reloads). The default is
+  `qwen3:4b-instruct` (2.5 GB): half the size of `qwen3:8b`, so roughly twice as fast, with no hidden reasoning pass, and it got all of
+  our Arabic checks right (booking tool call, answering from clinic information, recognising a cancellation), which
+  `qwen3:0.6b`/`1.7b` did not. Avoid plain `qwen3:4b` in Ollama: it is now a reasoning-only model that "thinks"
+  before every reply. Reasoning is switched off for hybrid models such as `qwen3:8b`.
 * **Voice**: natural/cloned voices render each sentence; repeated phrases (greeting, "لحظة من فضلك", common
   questions) are cached and replay instantly, and "one moment" is pre-rendered for each call's voice. The standard
   voice (Piper) is the fastest. When checking takes longer than 0.9 s the agent says "لحظة من فضلك" instead of
