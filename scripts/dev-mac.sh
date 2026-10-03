@@ -1,13 +1,19 @@
 #!/usr/bin/env bash
-# Nexa local development on macOS without Docker: API + web app + demo clinic database.
+# Nexa on macOS without Docker: the whole platform runs natively.
 #
-#   scripts/dev-mac.sh               install what's missing (Homebrew), set up the databases, run API + web
-#   scripts/dev-mac.sh --setup-only  install and set up, don't start anything
-#   scripts/dev-mac.sh --no-brew     use PostgreSQL (with pgvector), Python 3.11+ and Node you installed yourself
+#   scripts/dev-mac.sh                          everything: database, API, web app, local LLM (Ollama + Qwen3),
+#                                               speech recognition (Whisper), voices (Piper + natural voices with
+#                                               cloning on the Apple Silicon GPU), LiveKit and the live-call worker
+#   scripts/dev-mac.sh --llm qwen3:4b           smaller model for Macs with 8-16 GB of memory (default qwen3:8b)
+#   scripts/dev-mac.sh --voice-model omnivoice  natural voices with OmniVoice instead of Chatterbox (non-commercial)
+#   scripts/dev-mac.sh --no-llm                 use an LLM you run elsewhere (set LLM_BASE_URL / LLM_MODEL)
+#   scripts/dev-mac.sh --no-voice               skip speech and live calls (text testing only, starts fastest)
+#   scripts/dev-mac.sh --setup-only             install and set up, don't start anything
+#   scripts/dev-mac.sh --no-brew                use PostgreSQL (pgvector), Python 3.11/3.12, Node, livekit-server
+#                                               and ollama you installed yourself
 #
-# Then open http://localhost:3000 and register an account. Ctrl+C stops everything.
-# Not included (use Docker for these): speech services (voice testing), LiveKit, the LLM.
-# Text testing and the full booking flow work. Compatible with macOS's bash 3.2.
+# Then open http://localhost:3000 and register an account. Ctrl+C stops everything. Logs are in .dev/*.log.
+# The first run downloads several GB of models (LLM ~5 GB, voices ~3 GB, Whisper ~1.6 GB). Compatible with bash 3.2.
 
 set -euo pipefail
 
@@ -16,20 +22,37 @@ API_DIR="$ROOT/apps/api"
 STATE_DIR="$ROOT/.dev"
 API_PORT="${API_PORT:-8000}"
 WEB_PORT="${WEB_PORT:-3000}"
+STT_PORT=8001
+TTS_PORT=8002
+NEURAL_PORT=8004
+LIVEKIT_PORT=7880
+OLLAMA_PORT=11434
+LLM="${LLM:-qwen3:8b}"
+VOICE_MODEL="${VOICE_MODEL:-chatterbox}"
 SETUP_ONLY=0
 USE_BREW=1
-for arg in "$@"; do
-  case "$arg" in
+WITH_LLM=1
+WITH_VOICE=1
+while [ $# -gt 0 ]; do
+  case "$1" in
     --setup-only) SETUP_ONLY=1 ;;
     --no-brew) USE_BREW=0 ;;
-    -h|--help) sed -n '2,11p' "$0"; exit 0 ;;
-    *) echo "Unknown option: $arg" >&2; exit 2 ;;
+    --no-llm) WITH_LLM=0 ;;
+    --no-voice) WITH_VOICE=0 ;;
+    --llm) LLM="${2:?--llm needs a model name, e.g. qwen3:8b}"; shift ;;
+    --llm=*) LLM="${1#--llm=}" ;;
+    --voice-model) VOICE_MODEL="${2:?--voice-model needs chatterbox or omnivoice}"; shift ;;
+    --voice-model=*) VOICE_MODEL="${1#--voice-model=}" ;;
+    -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
+  shift
 done
 
 step() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 info() { printf '    %s\n' "$*"; }
 die() { printf '\n\033[1;31mError:\033[0m %s\n' "$*" >&2; exit 1; }
+trap 'printf "\n\033[1;31mError:\033[0m a step failed (scripts/dev-mac.sh line %s). See the output above.\n" "$LINENO" >&2' ERR
 
 mkdir -p "$STATE_DIR"
 
@@ -51,6 +74,8 @@ if [ "$USE_BREW" = 1 ]; then
   brew_install "$PG_FORMULA"
   brew_install python@3.12
   command -v node >/dev/null 2>&1 || brew_install node
+  [ "$WITH_VOICE" = 1 ] && brew_install livekit
+  if [ "$WITH_LLM" = 1 ] && ! command -v ollama >/dev/null 2>&1; then brew_install ollama; fi
 
   PG_BIN="$(brew --prefix "$PG_FORMULA")/bin"
   info "using $PG_FORMULA"
@@ -72,6 +97,21 @@ done
 if [ -z "$PYTHON" ] && [ "$USE_BREW" = 1 ]; then PYTHON="$(brew --prefix python@3.12)/bin/python3.12"; fi
 [ -n "$PYTHON" ] && [ -x "$PYTHON" ] || die "Python 3.11+ is required (brew install python@3.12)."
 command -v npm >/dev/null 2>&1 || die "Node.js 20+ is required (brew install node)."
+if [ "$WITH_VOICE" = 1 ]; then
+  command -v livekit-server >/dev/null 2>&1 || die "livekit-server is required for live calls (brew install livekit), or use --no-voice."
+fi
+if [ "$WITH_LLM" = 1 ]; then
+  command -v ollama >/dev/null 2>&1 || die "Ollama is required for the local LLM (brew install ollama), or use --no-llm."
+fi
+# Speech services use Python 3.11/3.12: the voice models don't support newer versions yet.
+SPEECH_PYTHON=""
+for candidate in python3.12 python3.11; do
+  if command -v "$candidate" >/dev/null 2>&1; then SPEECH_PYTHON="$(command -v "$candidate")"; break; fi
+done
+if [ -z "$SPEECH_PYTHON" ] && [ "$USE_BREW" = 1 ]; then SPEECH_PYTHON="$(brew --prefix python@3.12)/bin/python3.12"; fi
+if [ "$WITH_VOICE" = 1 ]; then
+  [ -n "$SPEECH_PYTHON" ] && [ -x "$SPEECH_PYTHON" ] || die "Python 3.11 or 3.12 is required for speech (brew install python@3.12)."
+fi
 info "python: $PYTHON"
 info "node:   $(node --version)"
 
@@ -144,6 +184,48 @@ else
   info "node_modules up to date"
 fi
 
+# Creates/updates a virtualenv only when its requirements change.
+pyenv() {  # name python requirement-args...
+  local name="$1" py="$2"; shift 2
+  local venv="$STATE_DIR/$name" stamp="$STATE_DIR/$name.sha" want arg
+  want="$(for arg in "$@"; do echo "$arg"; if [ -f "$arg" ]; then cat "$arg"; elif [ -f "$arg/pyproject.toml" ]; then cat "$arg/pyproject.toml"; fi; done | shasum | cut -d' ' -f1)"
+  [ -x "$venv/bin/python" ] || "$py" -m venv "$venv"
+  if [ ! -f "$stamp" ] || [ "$(cat "$stamp")" != "$want" ]; then
+    info "installing $name (first run takes a few minutes)"
+    "$venv/bin/pip" install -q --upgrade pip
+    "$venv/bin/pip" install -q "$@"
+    echo "$want" > "$stamp"
+  else
+    info "$name up to date"
+  fi
+}
+
+if [ "$WITH_VOICE" = 1 ]; then
+  step "Speech services"
+  pyenv stt "$SPEECH_PYTHON" -r "$ROOT/services/stt/requirements.txt"
+  pyenv tts "$SPEECH_PYTHON" -r "$ROOT/services/tts/requirements.txt"
+  pyenv voice-runtime "$SPEECH_PYTHON" -e "$API_DIR" -r "$ROOT/services/voice-runtime/requirements.txt"
+  if [ ! -f "$STATE_DIR/silero.ok" ]; then
+    info "downloading the voice activity model"
+    (cd "$ROOT/services/voice-runtime" && "$STATE_DIR/voice-runtime/bin/python" -m nexa_voice.main download-files >/dev/null 2>&1) \
+      && touch "$STATE_DIR/silero.ok" || info "could not download it now; the call worker will retry"
+  fi
+  info "natural voices ($VOICE_MODEL)"
+  "$ROOT/scripts/voice-mac.sh" --model "$VOICE_MODEL" --setup-only | sed 's/^/    /'
+fi
+
+if [ "$WITH_LLM" = 1 ]; then
+  step "Local LLM ($LLM with Ollama)"
+  if ! curl -sf "http://localhost:$OLLAMA_PORT/api/version" >/dev/null 2>&1; then
+    info "starting Ollama"
+    (ollama serve > "$STATE_DIR/ollama.log" 2>&1 &)
+    for _ in $(seq 1 30); do curl -sf "http://localhost:$OLLAMA_PORT/api/version" >/dev/null 2>&1 && break; sleep 1; done
+  fi
+  curl -sf "http://localhost:$OLLAMA_PORT/api/version" >/dev/null 2>&1 || die "Ollama did not start (see .dev/ollama.log)."
+  if ollama list 2>/dev/null | awk '{print $1}' | grep -qx "$LLM"; then info "$LLM already downloaded"
+  else info "downloading $LLM (once)"; ollama pull "$LLM"; fi
+fi
+
 # ---------------------------------------------------------------------------------------------
 # Local settings. The repo-root .env (if any) is for Docker and is not read here.
 export ENVIRONMENT=development
@@ -152,10 +234,18 @@ export DEMO_CLINIC_DATABASE_URL="postgresql://clinic_agent:clinic_agent@localhos
 export ALLOW_PRIVATE_NETWORK_INTEGRATIONS=true
 export JOBS_INLINE=true            # process documents in the API instead of a Redis worker
 export SIP_PROVIDER=none
-export LLM_BASE_URL="${LLM_BASE_URL:-http://localhost:8010/v1}"
-export STT_BASE_URL="${STT_BASE_URL:-http://localhost:8001/v1}"
-export TTS_BASE_URL="${TTS_BASE_URL:-http://localhost:8002}"
-export NEURAL_TTS_BASE_URL="${NEURAL_TTS_BASE_URL:-http://localhost:8004}"
+if [ "$WITH_LLM" = 1 ]; then
+  export LLM_PROVIDER=local LLM_BASE_URL="http://localhost:$OLLAMA_PORT/v1" LLM_MODEL="$LLM" LLM_API_KEY=not-needed
+else
+  export LLM_BASE_URL="${LLM_BASE_URL:-http://localhost:8010/v1}"
+fi
+export STT_PROVIDER=whisper STT_BASE_URL="http://localhost:$STT_PORT/v1"
+export TTS_PROVIDER=piper TTS_BASE_URL="http://localhost:$TTS_PORT"
+export NEURAL_TTS_BASE_URL="http://localhost:$NEURAL_PORT"
+export LIVEKIT_URL="ws://localhost:$LIVEKIT_PORT" LIVEKIT_API_URL="http://localhost:$LIVEKIT_PORT"
+export LIVEKIT_PUBLIC_URL="ws://localhost:$LIVEKIT_PORT"
+export LIVEKIT_API_KEY=devkey LIVEKIT_API_SECRET=devsecret_devsecret_devsecret_devsecret
+MODELS_DIR="$STATE_DIR/models"
 export CORS_ORIGINS="[\"http://localhost:$WEB_PORT\"]"
 export API_INTERNAL_URL="http://localhost:$API_PORT"
 unset NEXT_PUBLIC_API_URL || true
@@ -164,35 +254,103 @@ step "Database migrations"
 (cd "$API_DIR" && "$VENV/bin/alembic" upgrade head)
 
 if [ "$SETUP_ONLY" = 1 ]; then
-  step "Setup complete. Run scripts/dev-mac.sh to start the API and web app."
+  step "Setup complete. Run scripts/dev-mac.sh to start everything."
   exit 0
 fi
 
 # ---------------------------------------------------------------------------------------------
 port_busy() { lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1; }
-port_busy "$API_PORT" && die "Port $API_PORT is already in use (another API?). Stop it or set API_PORT=..."
-port_busy "$WEB_PORT" && die "Port $WEB_PORT is already in use. Stop it or set WEB_PORT=..."
+for port in "$API_PORT" "$WEB_PORT"; do
+  port_busy "$port" && die "Port $port is already in use. Stop what is using it (lsof -i :$port) or set API_PORT/WEB_PORT."
+done
+if [ "$WITH_VOICE" = 1 ]; then
+  for port in "$STT_PORT" "$TTS_PORT" "$NEURAL_PORT" "$LIVEKIT_PORT"; do
+    port_busy "$port" && die "Port $port is already in use (Docker still running? docker compose down). Stop it first."
+  done
+fi
 
-API_LOG="$STATE_DIR/api.log"
-step "Starting the API on http://localhost:$API_PORT (log: .dev/api.log)"
-(cd "$API_DIR" && exec "$VENV/bin/uvicorn" nexa.main:app --reload --port "$API_PORT") > "$API_LOG" 2>&1 &
-API_PID=$!
-
+PIDS=""
 cleanup() {
   printf '\nStopping...\n'
-  kill "$API_PID" 2>/dev/null || true
-  wait "$API_PID" 2>/dev/null || true
+  for pid in $PIDS; do kill "$pid" 2>/dev/null || true; done
+  for pid in $PIDS; do wait "$pid" 2>/dev/null || true; done
 }
 trap cleanup EXIT INT TERM
 
-for _ in $(seq 1 60); do
-  if curl -sf "http://localhost:$API_PORT/ready" >/dev/null 2>&1; then break; fi
-  kill -0 "$API_PID" 2>/dev/null || { tail -30 "$API_LOG"; die "The API failed to start (see above)."; }
-  sleep 1
-done
-curl -sf "http://localhost:$API_PORT/ready" >/dev/null 2>&1 || { tail -30 "$API_LOG"; die "The API did not become ready."; }
+# start NAME DIR COMMAND...: runs in the background with its log in .dev/NAME.log
+start() {
+  local name="$1" dir="$2"; shift 2
+  (cd "$dir" && exec "$@") > "$STATE_DIR/$name.log" 2>&1 &
+  PIDS="$PIDS $!"
+}
+# wait_for NAME URL SECONDS: true once URL answers; false if the process died or time ran out
+wait_for() {
+  local name="$1" url="$2" secs="$3"
+  for _ in $(seq 1 "$secs"); do
+    curl -sf "$url" >/dev/null 2>&1 && return 0
+    sleep 1
+  done
+  return 1
+}
+
+if [ "$WITH_VOICE" = 1 ]; then
+  step "Starting speech and live-call services (logs in .dev/)"
+  mkdir -p "$MODELS_DIR"
+  cat > "$STATE_DIR/livekit.yaml" <<YAML
+port: $LIVEKIT_PORT
+bind_addresses: ["127.0.0.1"]
+rtc: { tcp_port: 7881, port_range_start: 50000, port_range_end: 50100, use_external_ip: false, node_ip: 127.0.0.1 }
+keys: { devkey: devsecret_devsecret_devsecret_devsecret }
+logging: { level: info }
+YAML
+  start livekit "$STATE_DIR" livekit-server --config "$STATE_DIR/livekit.yaml"
+  start stt "$ROOT/services/stt" env WHISPER_MODEL="${WHISPER_MODEL:-large-v3-turbo}" WHISPER_DEVICE=cpu \
+    WHISPER_COMPUTE_TYPE=int8 WHISPER_MODEL_DIR="$MODELS_DIR/whisper" \
+    "$STATE_DIR/stt/bin/uvicorn" app:app --host 127.0.0.1 --port "$STT_PORT"
+  start tts "$ROOT/services/tts" env TTS_ENGINES=piper PIPER_VOICE_DIR="$MODELS_DIR/piper" \
+    "$STATE_DIR/tts/bin/uvicorn" app:app --host 127.0.0.1 --port "$TTS_PORT"
+  start voices "$ROOT" env NEURAL_PORT="$NEURAL_PORT" NEURAL_VOICE_DIR="$MODELS_DIR/neural-voices" \
+    "$ROOT/scripts/voice-mac.sh" --model "$VOICE_MODEL"
+fi
+
+step "Starting the API on http://localhost:$API_PORT"
+start api "$API_DIR" "$VENV/bin/uvicorn" nexa.main:app --reload --port "$API_PORT"
+wait_for api "http://localhost:$API_PORT/ready" 60 || { tail -30 "$STATE_DIR/api.log"; die "The API did not start (see above)."; }
 info "API ready - docs at http://localhost:$API_PORT/docs"
 
-step "Starting the web app on http://localhost:$WEB_PORT  (Ctrl+C to stop everything)"
-cd "$ROOT/apps/web"
-npx next dev -p "$WEB_PORT"
+if [ "$WITH_VOICE" = 1 ]; then
+  start voice-runtime "$ROOT/services/voice-runtime" env VOICE_MAX_CALLS="${VOICE_MAX_CALLS:-4}" \
+    "$STATE_DIR/voice-runtime/bin/python" -m nexa_voice.main dev
+fi
+
+step "Starting the web app on http://localhost:$WEB_PORT"
+start web "$ROOT/apps/web" npx next dev -p "$WEB_PORT"
+wait_for web "http://localhost:$WEB_PORT/login" 120 || { tail -30 "$STATE_DIR/web.log"; die "The web app did not start."; }
+
+if [ "$WITH_VOICE" = 1 ]; then
+  # Calls placed while the models are still loading are dropped, so wait for them (first start downloads them).
+  step "Loading speech models (first start downloads them; can take several minutes)"
+  for svc in "Recognition:$STT_PORT:stt" "Voices:$TTS_PORT:tts" "Natural voices:$NEURAL_PORT:voices"; do
+    label="${svc%%:*}"; rest="${svc#*:}"; port="${rest%%:*}"; log="${rest#*:}"
+    if wait_for "$log" "http://localhost:$port/health" 600; then info "$label ready"
+    else info "$label still loading - see .dev/$log.log"; fi
+  done
+fi
+
+step "Status"
+status() {  # label url log
+  if curl -sf "$2" >/dev/null 2>&1; then printf '    \033[32mready\033[0m     %s\n' "$1"
+  else printf '    \033[33mstarting\033[0m  %s  (models load on first start; see .dev/%s.log)\n' "$1" "$3"; fi
+}
+status "Web app       http://localhost:$WEB_PORT" "http://localhost:$WEB_PORT/login" web
+status "API           http://localhost:$API_PORT/docs" "http://localhost:$API_PORT/ready" api
+if [ "$WITH_LLM" = 1 ]; then status "LLM           $LLM (Ollama)" "http://localhost:$OLLAMA_PORT/api/version" ollama; fi
+if [ "$WITH_VOICE" = 1 ]; then
+  wait_for livekit "http://localhost:$LIVEKIT_PORT" 10 || true
+  status "LiveKit       ws://localhost:$LIVEKIT_PORT" "http://localhost:$LIVEKIT_PORT" livekit
+  status "Recognition   Whisper ${WHISPER_MODEL:-large-v3-turbo}" "http://localhost:$STT_PORT/health" stt
+  status "Voices        Piper" "http://localhost:$TTS_PORT/health" tts
+  status "Natural voices $VOICE_MODEL" "http://localhost:$NEURAL_PORT/health" voices
+fi
+printf '\n    Open http://localhost:%s - Ctrl+C stops everything.\n' "$WEB_PORT"
+wait

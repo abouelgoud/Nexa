@@ -6,11 +6,27 @@ so the same provider works with other compatible servers later.
 
 from __future__ import annotations
 
+import re
 import time
 
 import httpx
 
 from nexa.providers.stt.base import STTError, STTProvider, TranscriptionResult, TranscriptSegment
+
+# services/stt uses this hint when the caller passes none.
+SERVICE_DEFAULT_PROMPT = "مكالمة هاتفية. Phone call in Arabic and English."
+_NOT_WORD = re.compile(r"[\W_]+", re.UNICODE)
+
+
+def _norm(text: str) -> str:
+    return _NOT_WORD.sub(" ", text).strip().lower()
+
+
+def echoes_hint(text: str, *hints: str | None) -> bool:
+    """Whisper sometimes "hears" its own hint text (prompt / hotwords) in near-silence. Such a transcript is not
+    something the caller said."""
+    said = _norm(text)
+    return bool(said) and any(said in _norm(h) for h in hints if h)
 
 
 class WhisperHTTPSTT(STTProvider):
@@ -43,8 +59,11 @@ class WhisperHTTPSTT(STTProvider):
         if r.status_code >= 400:
             raise STTError(f"Speech recognition failed ({r.status_code}): {r.text[:200]}")
         body = r.json()
+        text = (body.get("text") or "").strip()
+        if echoes_hint(text, prompt or SERVICE_DEFAULT_PROMPT, data.get("hotwords")):
+            text, body["segments"] = "", []
         return TranscriptionResult(
-            text=(body.get("text") or "").strip(),
+            text=text,
             language=body.get("language"),
             language_probability=body.get("language_probability"),
             duration_seconds=float(body.get("duration") or 0.0),

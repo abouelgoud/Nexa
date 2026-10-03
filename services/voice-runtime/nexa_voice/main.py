@@ -6,6 +6,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import urllib.request
+from urllib.parse import urlparse
 from uuid import UUID
 
 from livekit.agents import AgentServer, AgentSession, JobContext, JobProcess, cli
@@ -26,7 +29,41 @@ log = logging.getLogger("nexa.voice")
 AGENT_NAME = "nexa-voice"
 
 s = get_settings()
-server = AgentServer(ws_url=s.livekit_url, api_key=s.livekit_api_key, api_secret=s.livekit_api_secret)
+
+
+def livekit_proxy(url: str) -> str | None:
+    """The proxy for reaching LiveKit. livekit-agents uses HTTPS_PROXY for every host, ignoring NO_PROXY,
+    so a local LiveKit (localhost, a Docker service name) behind a corporate proxy would be unreachable."""
+    proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or os.environ.get("HTTP_PROXY")
+    host = urlparse(url).hostname or ""
+    if not proxy or urllib.request.proxy_bypass_environment(host):
+        return None
+    return proxy
+
+
+# Everything runs on your own servers: no LiveKit Cloud turn/interruption models. The caller can interrupt
+# (barge-in), and their words are never thrown away as a "false interruption" while Whisper is still transcribing.
+TURN_HANDLING = {
+    "turn_detection": "vad",
+    "endpointing": {"min_delay": 0.4, "max_delay": 2.5},
+    # Keep what the caller says while the agent can't be interrupted (e.g. the first seconds of the greeting),
+    # instead of dropping it and hearing only the end of their sentence.
+    "interruption": {"enabled": True, "mode": "vad", "min_duration": 0.5, "discard_audio_if_uninterruptible": False,
+                     "resume_false_interruption": False, "false_interruption_timeout": None},
+}
+
+# By default LiveKit only sends calls to a worker while the machine's CPU is below 70%. When everything runs on one
+# computer (scripts/dev-mac.sh: LLM, Whisper, voices), CPU says little about free call capacity, so
+# VOICE_MAX_CALLS=N reports load as calls in progress / N instead.
+MAX_CALLS = int(os.getenv("VOICE_MAX_CALLS", "0"))
+
+
+def calls_load(worker: AgentServer) -> float:
+    return min(len(worker.active_jobs) / MAX_CALLS, 1.0)
+
+
+server = AgentServer(ws_url=s.livekit_url, api_key=s.livekit_api_key, api_secret=s.livekit_api_secret,
+                     http_proxy=livekit_proxy(s.livekit_url), **({"load_fnc": calls_load} if MAX_CALLS > 0 else {}))
 
 
 def prewarm(proc: JobProcess) -> None:
@@ -81,8 +118,7 @@ async def entrypoint(ctx: JobContext) -> None:
     agent = NexaVoiceAgent(handle, tts_for_language=switch_voice)
     session = AgentSession(stt=NexaSTT(get_stt(), prompt="مكالمة هاتفية. Phone call in Arabic and English.",
                                        keywords=stt_keywords(defn)),
-                           llm=RuntimeLLM(), tts=voice_tts, vad=ctx.proc.userdata["vad"], allow_interruptions=True,
-                           min_endpointing_delay=0.4, max_endpointing_delay=2.5)
+                           llm=RuntimeLLM(), tts=voice_tts, vad=ctx.proc.userdata["vad"], turn_handling=TURN_HANDLING)
 
     async def finish(reason: str = "caller_hangup") -> None:
         async with get_sessionmaker()() as db:

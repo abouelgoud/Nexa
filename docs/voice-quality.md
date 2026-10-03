@@ -21,8 +21,9 @@ the **recognition engine per deployment** (`STT_PROVIDER`). Everything sits behi
   scripts/voice-mac.sh --model omnivoice   # OmniVoice, VoiceStudio's engine - weights are CC-BY-NC (non-commercial)
   ```
 
-  Then set `NEURAL_TTS_BASE_URL=http://host.docker.internal:8004` in `.env` and `docker compose up -d api voice-runtime`
-  (`scripts/dev-mac.sh` already points there). Docker Desktop on macOS can't use the Mac's GPU, which is why the
+  `scripts/dev-mac.sh` runs it automatically together with the rest of the platform, all without Docker. If you use
+  Docker for the rest, set `NEURAL_TTS_BASE_URL=http://host.docker.internal:8004` in `.env` and
+  `docker compose up -d api voice-runtime`. Docker Desktop on macOS can't use the Mac's GPU, which is why the
   service runs natively. The device is picked automatically (`NEURAL_DEVICE=auto`: NVIDIA, then Metal, then CPU).
   On the CPU, creating voices works but each sentence takes far too long for live calls.
 * **Answer in the caller's dialect** (Azure): the agent detects the caller's dialect and replies with a native voice

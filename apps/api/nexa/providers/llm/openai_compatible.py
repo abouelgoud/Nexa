@@ -46,9 +46,13 @@ class OpenAICompatibleLLM(LLMProvider):
         )
 
     def _payload(self, messages: list[ChatMessage], temperature, max_tokens, **extra) -> dict[str, Any]:
+        wire = [m.to_openai() for m in messages]
+        if self.disable_thinking and "qwen3" in self.model.lower() and wire and wire[0]["role"] == "system":
+            # Qwen3's own switch: works on every server (Ollama ignores chat_template_kwargs below).
+            wire[0] = {**wire[0], "content": f"{wire[0]['content']}\n/no_think"}
         payload: dict[str, Any] = {
             "model": self.model,
-            "messages": [m.to_openai() for m in messages],
+            "messages": wire,
             "temperature": self.temperature if temperature is None else temperature,
             "max_tokens": max_tokens or self.max_tokens,
         }

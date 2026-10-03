@@ -15,3 +15,6 @@ __pycache__/
 coverage/
 next-env.d.ts
 .dev/
+
+# pip build output (scripts/dev-mac.sh installs the API package)
+apps/api/build/

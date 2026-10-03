@@ -1,1 +1,2 @@
-livekit-agents[silero]~=1.8
+# 1.8.4+ for turn_handling (see TURN_HANDLING in nexa_voice/main.py)
+livekit-agents[silero]~=1.8.4

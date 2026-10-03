@@ -37,6 +37,22 @@ async def test_tool_calls_parsed_and_thinking_disabled():
     assert seen[0]["tool_choice"] == "auto"
 
 
+async def test_qwen3_thinking_switched_off_on_any_server():
+    """Ollama ignores chat_template_kwargs, so Qwen3's own /no_think switch goes in the system prompt."""
+    seen = []
+
+    def handler(req: httpx.Request):
+        seen.append(json.loads(req.content))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "أهلاً"}}], "usage": {}})
+
+    for model in ("qwen3:8b", "llama3.1"):
+        llm = OpenAICompatibleLLM("http://localhost:11434/v1", model, transport=httpx.MockTransport(handler))
+        await llm.generate([ChatMessage("system", "You are a receptionist."), ChatMessage("user", "مرحبا")])
+    assert seen[0]["messages"][0]["content"] == "You are a receptionist.\n/no_think"
+    assert seen[0]["messages"][1]["content"] == "مرحبا"
+    assert seen[1]["messages"][0]["content"] == "You are a receptionist."  # other models untouched
+
+
 async def test_hidden_reasoning_never_returned():
     assert strip_reasoning("<think>secret plan</think>\nأهلاً") == "أهلاً"
     assert strip_reasoning("answer <think>truncated") == "answer"
@@ -96,3 +112,19 @@ async def test_piper_tts():
     tts = PiperHTTPTTS("http://tts:8002", transport=httpx.MockTransport(handler))
     r = await tts.synthesize("مرحبا", voice_id="ar_JO-kareem-medium", language="ar")
     assert r.audio == b"RIFFWAVE" and r.characters == 5
+
+
+async def test_whisper_echo_of_its_hint_is_not_caller_speech():
+    """Near-silence can make Whisper output its own prompt; that must not become a caller turn."""
+    replies = iter(["Phone call in Arabic and English.", "مكالمة هاتفية", "عيادة الجلدية", "أبغى موعد جلدية"])
+
+    def handler(_):
+        return httpx.Response(200, json={"text": next(replies), "language": "ar", "duration": 1.0,
+                                         "segments": [{"text": "x", "start": 0, "end": 1}]})
+
+    stt = WhisperHTTPSTT("http://stt:8001/v1", transport=httpx.MockTransport(handler))
+    assert (await stt.transcribe(b"RIFF")).text == ""  # echo of the service's default hint
+    r = await stt.transcribe(b"RIFF", prompt="مكالمة هاتفية. Phone call in Arabic and English.")
+    assert r.text == "" and r.segments == []
+    assert (await stt.transcribe(b"RIFF", keywords=["عيادة الجلدية", "د. سارة"])).text == ""  # hotwords echo
+    assert (await stt.transcribe(b"RIFF", keywords=["جلدية"])).text == "أبغى موعد جلدية"  # real speech kept

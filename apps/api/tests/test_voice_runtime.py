@@ -142,3 +142,27 @@ async def test_voice_follows_caller_dialect(account, clinic_db):
                            tts_for_language=lambda lang, dialect: switches.append((lang, dialect)))
     await agent.run_turn("عايز احجز معاد دلوقتي")
     assert switches[-1] == ("ar", "eg")
+
+
+def test_livekit_reached_directly_when_no_proxy_lists_it(monkeypatch):
+    from nexa_voice.main import livekit_proxy
+
+    for name in ("https_proxy", "http_proxy", "HTTP_PROXY", "no_proxy"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.corp:3128")
+    monkeypatch.setenv("NO_PROXY", "localhost,127.0.0.1,livekit")
+    assert livekit_proxy("ws://localhost:7880") is None
+    assert livekit_proxy("ws://livekit:7880") is None
+    assert livekit_proxy("wss://cloud.livekit.example") == "http://proxy.corp:3128"
+    monkeypatch.delenv("HTTPS_PROXY")
+    assert livekit_proxy("wss://cloud.livekit.example") is None
+
+
+def test_call_capacity_counts_calls_not_cpu(monkeypatch):
+    import nexa_voice.main as voice_main
+
+    monkeypatch.setattr(voice_main, "MAX_CALLS", 4)
+    worker = type("W", (), {"active_jobs": [object(), object()]})()
+    assert voice_main.calls_load(worker) == 0.5
+    worker.active_jobs = [object()] * 9
+    assert voice_main.calls_load(worker) == 1.0

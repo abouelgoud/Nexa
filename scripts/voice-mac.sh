@@ -62,8 +62,15 @@ VENV="$STATE_DIR/voice-$MODEL"
 step "Installing the $MODEL voice engine into $VENV"
 mkdir -p "$STATE_DIR"
 [ -x "$VENV/bin/python" ] || "$PY" -m venv "$VENV"
-"$VENV/bin/pip" install -q --upgrade pip
-"$VENV/bin/pip" install -q -r "$REQS" fastapi "uvicorn[standard]" python-multipart
+STAMP="$VENV/.nexa-reqs"
+WANT="$(cat "$REQS" "$SERVICE_DIR/requirements.txt" | shasum | cut -d' ' -f1)"
+if [ ! -f "$STAMP" ] || [ "$(cat "$STAMP")" != "$WANT" ]; then
+  "$VENV/bin/pip" install -q --upgrade pip
+  "$VENV/bin/pip" install -q -r "$REQS" fastapi "uvicorn[standard]" python-multipart
+  echo "$WANT" > "$STAMP"
+else
+  info "already installed"
+fi
 
 DEVICE="$("$VENV/bin/python" -c 'import torch
 print("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")')"

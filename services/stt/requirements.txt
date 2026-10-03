@@ -2,3 +2,5 @@ fastapi>=0.115
 uvicorn[standard]>=0.30
 python-multipart>=0.0.9
 faster-whisper>=1.1
+# PyAV 19 removed an argument faster-whisper passes when decoding audio ("metadata_errors").
+av>=11,<19
