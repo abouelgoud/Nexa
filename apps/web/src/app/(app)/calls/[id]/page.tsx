@@ -40,6 +40,10 @@ export default function CallDetailPage() {
                       <div dir="auto" className="mt-1 text-[11px] opacity-75">normalized: {m.normalized_text}</div>)}
                     {m.role === "user" && (m.language || m.dialect) && (
                       <div className="mt-1 text-[10px] opacity-75">{m.language}{m.dialect && ` · ${dialectName(m.dialect)}`}{m.metadata?.code_switching && " · mixed"}</div>)}
+                    {(m.metadata?.stt?.latency_ms || m.metadata?.turn_ms) && (
+                      <div className="mt-1 text-[10px] opacity-75">
+                        {m.role === "user" ? "recognized in " : "answered in "}{seconds(m.metadata?.stt?.latency_ms ?? m.metadata?.turn_ms)}
+                      </div>)}
                   </div>
                 </div>
               ))}
@@ -102,4 +106,8 @@ export default function CallDetailPage() {
       </div>
     </>
   );
+}
+
+function seconds(ms: number): string {
+  return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`;
 }

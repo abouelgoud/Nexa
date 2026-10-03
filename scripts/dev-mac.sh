@@ -252,12 +252,16 @@ if [ "$WITH_LLM" = 1 ]; then
   step "Local LLM ($LLM with Ollama)"
   if ! curl -sf "http://localhost:$OLLAMA_PORT/api/version" >/dev/null 2>&1; then
     info "starting Ollama"
-    (ollama serve > "$STATE_DIR/ollama.log" 2>&1 &)
+    (OLLAMA_KEEP_ALIVE=-1 ollama serve > "$STATE_DIR/ollama.log" 2>&1 &)
     for _ in $(seq 1 30); do curl -sf "http://localhost:$OLLAMA_PORT/api/version" >/dev/null 2>&1 && break; sleep 1; done
   fi
   curl -sf "http://localhost:$OLLAMA_PORT/api/version" >/dev/null 2>&1 || die "Ollama did not start (see .dev/ollama.log)."
   if ollama list 2>/dev/null | awk '{print $1}' | grep -qx "$LLM"; then info "$LLM already downloaded"
   else info "downloading $LLM (once)"; ollama pull "$LLM"; fi
+  # Load the model now and keep it in memory: otherwise Ollama unloads it after 5 idle minutes and the next
+  # caller waits several seconds while it reloads.
+  (curl -sf "http://localhost:$OLLAMA_PORT/api/generate" -d "{\"model\": \"$LLM\", \"keep_alive\": -1}" \
+    >/dev/null 2>&1 &)
 fi
 
 # ---------------------------------------------------------------------------------------------
@@ -338,8 +342,10 @@ keys: { devkey: devsecret_devsecret_devsecret_devsecret }
 logging: { level: info }
 YAML
   start livekit "$STATE_DIR" livekit-server --config "$STATE_DIR/livekit.yaml"
+  # Whisper runs on the Apple Silicon GPU (mlx) when available; greedy decoding (beam 1) is as accurate on call
+  # audio and faster.
   start stt "$ROOT/services/stt" env WHISPER_MODEL="${WHISPER_MODEL:-large-v3-turbo}" WHISPER_DEVICE=cpu \
-    WHISPER_COMPUTE_TYPE=int8 WHISPER_MODEL_DIR="$MODELS_DIR/whisper" \
+    WHISPER_COMPUTE_TYPE=int8 WHISPER_BEAM_SIZE="${WHISPER_BEAM_SIZE:-1}" WHISPER_MODEL_DIR="$MODELS_DIR/whisper" \
     "$STATE_DIR/stt/bin/uvicorn" app:app --host 127.0.0.1 --port "$STT_PORT"
   start tts "$ROOT/services/tts" env TTS_ENGINES=piper PIPER_VOICE_DIR="$MODELS_DIR/piper" \
     "$STATE_DIR/tts/bin/uvicorn" app:app --host 127.0.0.1 --port "$TTS_PORT"
@@ -382,7 +388,7 @@ if [ "$WITH_LLM" = 1 ]; then status "LLM           $LLM (Ollama)" "http://localh
 if [ "$WITH_VOICE" = 1 ]; then
   wait_for livekit "http://localhost:$LIVEKIT_PORT" 10 || true
   status "LiveKit       ws://localhost:$LIVEKIT_PORT" "http://localhost:$LIVEKIT_PORT" livekit
-  status "Recognition   Whisper ${WHISPER_MODEL:-large-v3-turbo}" "http://localhost:$STT_PORT/health" stt
+  status "Recognition   Whisper ${WHISPER_MODEL:-large-v3-turbo} ($(curl -sf "http://localhost:$STT_PORT/health" | sed -n 's/.*"engine": *"\([^"]*\)".*/\1/p'))" "http://localhost:$STT_PORT/health" stt
   status "Voices        Piper" "http://localhost:$TTS_PORT/health" tts
   status "Natural voices $VOICE_MODEL" "http://localhost:$NEURAL_PORT/health" voices
 fi

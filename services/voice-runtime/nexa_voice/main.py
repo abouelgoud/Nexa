@@ -22,7 +22,7 @@ from nexa.runtime.session import ConversationRuntime
 from nexa.schemas.agent_definition import AgentDefinition
 from nexa.services.telephony import resolve_inbound
 from nexa.services.voices import resolve_voice, stt_keywords
-from nexa_voice.agent import CallHandle, NexaVoiceAgent
+from nexa_voice.agent import FILLERS, CallHandle, NexaVoiceAgent
 from nexa_voice.plugins import NexaSTT, NexaTTS, RuntimeLLM
 
 log = logging.getLogger("nexa.voice")
@@ -129,8 +129,32 @@ async def entrypoint(ctx: JobContext) -> None:
 
     ctx.add_shutdown_callback(finish)
 
+    @session.on("metrics_collected")
+    def _on_metrics(ev) -> None:
+        # One line per stage, so a slow call shows where the time went (.dev/voice-runtime.log).
+        m, kind = ev.metrics, type(ev.metrics).__name__
+        if kind == "EOUMetrics":
+            log.info("timing: end of caller's turn detected after %.2fs", m.end_of_utterance_delay)
+        elif kind == "TTSMetrics" and m.ttfb >= 0 and m.audio_duration > 0:
+            log.info("timing: voice started after %.2fs (%.1fs of speech)", m.ttfb, m.audio_duration)
+
+    warmed: set[tuple[str, str]] = set()
+
+    async def warm_filler(language: str, voice_id: str) -> None:
+        """Render "one moment" for this voice ahead of time; the voice service caches it, so it plays instantly."""
+        try:
+            await tts_provider.synthesize(FILLERS.get(language, FILLERS["ar"]), voice_id=voice_id, language=language,
+                                          speed=defn.voice.speed)
+        except Exception:  # noqa: BLE001 - only an optimisation
+            log.debug("could not pre-render the filler phrase", exc_info=True)
+
     @session.on("agent_state_changed")
     def _on_state(ev) -> None:
+        # While the caller talks (after the agent spoke), pre-render the filler for the current voice once.
+        key = (voice_tts.language, voice_tts.voice_id)
+        if ev.new_state == "listening" and handle.thinking_fillers and key not in warmed:
+            warmed.add(key)
+            asyncio.create_task(warm_filler(*key))
         # Execute transfers / hang-ups only after the agent finished speaking.
         if ev.new_state == "listening" and handle.pending_actions:
             action = handle.pending_actions.pop(0)

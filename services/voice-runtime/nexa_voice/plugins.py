@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import logging
 import time
 import uuid
 import wave
@@ -14,6 +15,8 @@ from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, NOT_GIVEN, APIConn
 from nexa.core.observability import STT_LATENCY, TTS_LATENCY
 from nexa.providers.stt.base import STTError, STTProvider
 from nexa.providers.tts.base import TTSError, TTSProvider
+
+log = logging.getLogger("nexa.voice")
 
 
 def frames_to_wav(buffer: utils.AudioBuffer) -> bytes:
@@ -36,6 +39,7 @@ class NexaSTT(stt.STT):
         self._prompt = prompt
         self._keywords = keywords or []
         self.last_language: str | None = None
+        self.last_latency_ms: float | None = None
 
     async def _recognize_impl(self, buffer: utils.AudioBuffer, *, language: NotGivenOr[str] = NOT_GIVEN,
                               conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS) -> stt.SpeechEvent:
@@ -48,6 +52,8 @@ class NexaSTT(stt.STT):
             raise APIConnectionError(str(exc)) from exc
         STT_LATENCY.observe(time.perf_counter() - start)
         self.last_language = result.language
+        self.last_latency_ms = round((time.perf_counter() - start) * 1000, 1)
+        log.info("timing: recognized %.1fs of speech in %.2fs", result.duration_seconds, self.last_latency_ms / 1000)
         return stt.SpeechEvent(
             type=stt.SpeechEventType.FINAL_TRANSCRIPT, request_id=uuid.uuid4().hex,
             alternatives=[stt.SpeechData(language=result.language or "", text=result.text)],

@@ -285,9 +285,9 @@ class ConversationRuntime:
                 await self._workflow_turn(original, result)
             else:
                 await self._agent_turn(original, result)
-        for reply in result.replies:
-            self._store_message("assistant", reply)
         result.latency_ms["turn_total"] = round((time.perf_counter() - t0) * 1000, 1)
+        for reply in result.replies:
+            self._store_message("assistant", reply, meta={"turn_ms": result.latency_ms["turn_total"]})
         TURN_LATENCY.labels("workflow" if self.workflow_mode else "agent").observe(result.latency_ms["turn_total"] / 1000)
         await self._finish_turn(result)
         return result

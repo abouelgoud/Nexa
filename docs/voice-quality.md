@@ -58,6 +58,24 @@ fixes most errors on names - the most common source of misunderstanding on calls
 
 The browser test console records 16 kHz WAV; phone calls use LiveKit's audio pipeline with VAD and turn detection.
 
+## Call speed (how quickly the agent answers)
+
+Each turn is: detect that the caller stopped talking → recognise the speech → decide the reply → start speaking.
+Where the time goes is shown per turn on the call page ("recognized in", "answered in") and in
+`.dev/voice-runtime.log` (`timing:` lines).
+
+* **Recognition** is usually the slowest step without a GPU. On Apple Silicon the speech service runs Whisper on the
+  GPU with `mlx-whisper` automatically (falling back to faster-whisper on the CPU if it can't). Calls use greedy
+  decoding (`WHISPER_BEAM_SIZE=1`), which was as accurate as beam search on our Arabic call tests (13.4% vs 13.9% word
+  errors) and ~30% faster. If it's still slow on an older Mac: `WHISPER_MODEL=small scripts/dev-mac.sh` (faster,
+  less accurate).
+* **LLM**: `scripts/dev-mac.sh` loads the model at startup and keeps it in memory (Ollama otherwise unloads it after
+  5 idle minutes and the next caller waits while it reloads). Smaller model: `--llm qwen3:4b`.
+* **Voice**: natural/cloned voices render each sentence; repeated phrases (greeting, "لحظة من فضلك", common
+  questions) are cached and replay instantly, and "one moment" is pre-rendered for each call's voice. The standard
+  voice (Piper) is the fastest. When checking takes longer than 0.9 s the agent says "لحظة من فضلك" instead of
+  staying silent.
+
 ## Measured in development (CPU, synthetic test speech)
 
 Same Arabic sentence, transcribed back by Whisper large-v3 to check intelligibility:

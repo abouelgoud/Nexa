@@ -50,6 +50,7 @@ class NexaVoiceAgent(Agent):
             result = await rt.handle_user_text(text, stt=stt_meta)
             await db.commit()
         self.turns.append(result)
+        log.info("timing: reply decided in %.2fs", result.latency_ms.get("turn_total", 0) / 1000)
         self.handle.pending_actions.extend(a for a in result.actions if a.get("type") in ("transfer", "end_call"))
         if result.ended and not any(a.get("type") == "end_call" for a in self.handle.pending_actions):
             self.handle.pending_actions.append({"type": "end_call"})
@@ -68,7 +69,12 @@ class NexaVoiceAgent(Agent):
                 break
         if not user_text.strip():
             return
-        turn = asyncio.ensure_future(self.run_turn(user_text))
+        try:
+            stt = self.session.stt
+        except RuntimeError:  # not attached to a running session (tests)
+            stt = None
+        stt_meta = {"latency_ms": stt.last_latency_ms} if getattr(stt, "last_latency_ms", None) else None
+        turn = asyncio.ensure_future(self.run_turn(user_text, stt_meta))
         if self.handle.thinking_fillers:
             # A person says "one moment" while checking the system instead of going silent.
             done, _ = await asyncio.wait({turn}, timeout=FILLER_AFTER_SECONDS)

@@ -21,6 +21,7 @@ import threading
 import time
 import urllib.request
 import wave
+from collections import OrderedDict
 from pathlib import Path
 
 import neural
@@ -110,12 +111,26 @@ def voices() -> dict:
             "neural": neural.list_voices() if "neural" in ENGINES else []}
 
 
+# Natural voices take a while per sentence, and agents repeat many phrases (greeting, "one moment", questions),
+# so recent results are kept and replayed instantly.
+_cache: OrderedDict[tuple[str, str, str], tuple[bytes, int]] = OrderedDict()
+_cache_lock = threading.Lock()
+CACHE_SIZE = int(os.getenv("NEURAL_CACHE_SIZE", "200"))
+
+
+def _forget_voice(voice_id: str) -> None:
+    with _cache_lock:
+        for key in [k for k in _cache if k[0] == voice_id]:
+            del _cache[key]
+
+
 @app.post("/voices/clone")
 async def clone_voice(voice_id: str = Form(...), file: UploadFile = File(...)) -> dict:
     if "neural" not in ENGINES:
         raise HTTPException(503, "The neural engine is not enabled on this server.")
     if not re.fullmatch(r"[a-z0-9][a-z0-9\-]{1,60}", voice_id):
         raise HTTPException(400, "invalid voice id")
+    _forget_voice(voice_id)
     try:
         info = neural.save_reference(voice_id, await file.read(15_000_000))
     except ValueError as exc:
@@ -128,6 +143,7 @@ def delete_voice(voice_id: str) -> dict:
     if not re.fullmatch(r"[a-z0-9][a-z0-9\-]{1,60}", voice_id):
         raise HTTPException(400, "invalid voice id")
     neural.delete_reference(voice_id)
+    _forget_voice(voice_id)
     return {"deleted": voice_id}
 
 
@@ -137,12 +153,24 @@ def synthesize(req: SynthesisRequest) -> Response:
         if "neural" not in ENGINES:
             raise HTTPException(503, "The neural engine is not enabled on this server.")
         start = time.perf_counter()
-        try:
-            audio, rate = neural.synthesize(req.text, req.voice or "default", req.language)
-        except KeyError as exc:
-            raise HTTPException(404, f"unknown voice {req.voice}") from exc
+        key = (req.voice or "default", req.language, req.text.strip())
+        with _cache_lock:
+            hit = _cache.get(key)
+            if hit:
+                _cache.move_to_end(key)
+        if hit:
+            audio, rate = hit
+        else:
+            try:
+                audio, rate = neural.synthesize(req.text, key[0], req.language)
+            except KeyError as exc:
+                raise HTTPException(404, f"unknown voice {req.voice}") from exc
+            with _cache_lock:
+                _cache[key] = (audio, rate)
+                while len(_cache) > CACHE_SIZE:
+                    _cache.popitem(last=False)
         return Response(audio, media_type="audio/wav", headers={
-            "x-sample-rate": str(rate), "x-voice": req.voice or "default", "x-engine": "neural",
+            "x-sample-rate": str(rate), "x-voice": key[0], "x-engine": "neural", "x-cache": "hit" if hit else "miss",
             "x-synthesis-ms": str(round((time.perf_counter() - start) * 1000, 1))})
     if "piper" not in ENGINES:
         raise HTTPException(503, "The piper engine is not enabled on this server.")
