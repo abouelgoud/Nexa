@@ -98,7 +98,8 @@ class SynthesisRequest(BaseModel):
 
 @app.get("/health")
 def health() -> dict:
-    ready = (("piper" not in ENGINES) or bool(_voices)) and (("neural" not in ENGINES) or neural.loaded())
+    lazy = os.getenv("NEURAL_PRELOAD", "true") != "true"  # the natural voice model loads on first use
+    ready = (("piper" not in ENGINES) or bool(_voices)) and (("neural" not in ENGINES) or neural.loaded() or lazy)
     out = {"status": "ok" if ready else "loading", "engines": ENGINES, "voices": list(_voices)}
     if "neural" in ENGINES:
         out["neural"] = neural.info()

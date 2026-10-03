@@ -8,6 +8,10 @@
 #   scripts/dev-mac.sh --voice-model omnivoice  natural voices with OmniVoice instead of Chatterbox (non-commercial)
 #   scripts/dev-mac.sh --no-llm                 use an LLM you run elsewhere (set LLM_BASE_URL / LLM_MODEL)
 #   scripts/dev-mac.sh --no-voice               skip speech and live calls (text testing only, starts fastest)
+#   scripts/dev-mac.sh --small-pc               for 8 GB computers: smaller Whisper (a bit less accurate), no natural/cloned
+#                                               voices (the standard voice still works). ~4.5 GB with the LLM loaded,
+#                                               ~2.5 GB once it is idle and unloaded (default setup: ~5 GB / ~3 GB).
+#   scripts/dev-mac.sh --dev                    for changing the code: web app and API reload on save (uses more memory)
 #   scripts/dev-mac.sh --setup-only             install and set up, don't start anything
 #   scripts/dev-mac.sh --no-brew                use PostgreSQL (pgvector), Python 3.11/3.12, Node, livekit-server
 #                                               and ollama you installed yourself
@@ -27,17 +31,21 @@ TTS_PORT=8002
 NEURAL_PORT=8004
 LIVEKIT_PORT=7880
 OLLAMA_PORT=11434
-# Fast and accurate enough for calls (it got all our Arabic booking/answer/intent checks right; the 0.6b/1.7b
-# models did not). "instruct" = no hidden reasoning pass, which a phone call can't wait for.
-LLM="${LLM:-qwen3:4b-instruct}"
+# Light and accurate enough for calls: ~2.1 GB in memory, and it got all our Arabic booking/answer/intent checks
+# right (qwen2.5:1.5b and qwen3:1.7b did not). No hidden reasoning pass, which a phone call can't wait for.
+LLM="${LLM:-qwen2.5:3b}"
 VOICE_MODEL="${VOICE_MODEL:-chatterbox}"
 SETUP_ONLY=0
+DEV_MODE=0
+WITH_NATURAL=1
 USE_BREW=1
 WITH_LLM=1
 WITH_VOICE=1
 while [ $# -gt 0 ]; do
   case "$1" in
     --setup-only) SETUP_ONLY=1 ;;
+    --dev) DEV_MODE=1 ;;
+    --small-pc) WITH_NATURAL=0; WHISPER_MODEL="${WHISPER_MODEL:-small}" ;;
     --no-brew) USE_BREW=0 ;;
     --no-llm) WITH_LLM=0 ;;
     --no-voice) WITH_VOICE=0 ;;
@@ -45,7 +53,7 @@ while [ $# -gt 0 ]; do
     --llm=*) LLM="${1#--llm=}" ;;
     --voice-model) VOICE_MODEL="${2:?--voice-model needs chatterbox or omnivoice}"; shift ;;
     --voice-model=*) VOICE_MODEL="${1#--voice-model=}" ;;
-    -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,21p' "$0"; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
   shift
@@ -246,23 +254,26 @@ if [ "$WITH_VOICE" = 1 ]; then
     (cd "$ROOT/services/voice-runtime" && "$STATE_DIR/voice-runtime/bin/python" -m nexa_voice.main download-files >/dev/null 2>&1) \
       && touch "$STATE_DIR/silero.ok" || info "could not download it now; the call worker will retry"
   fi
-  info "natural voices ($VOICE_MODEL)"
-  "$ROOT/scripts/voice-mac.sh" --model "$VOICE_MODEL" --setup-only | sed 's/^/    /'
+  if [ "$WITH_NATURAL" = 1 ]; then
+    info "natural voices ($VOICE_MODEL)"
+    "$ROOT/scripts/voice-mac.sh" --model "$VOICE_MODEL" --setup-only | sed 's/^/    /'
+  fi
 fi
 
 if [ "$WITH_LLM" = 1 ]; then
   step "Local LLM ($LLM with Ollama)"
   if ! curl -sf "http://localhost:$OLLAMA_PORT/api/version" >/dev/null 2>&1; then
     info "starting Ollama"
-    (OLLAMA_KEEP_ALIVE=-1 ollama serve > "$STATE_DIR/ollama.log" 2>&1 &)
+    # One model, one conversation at a time, 4k context: keeps Ollama's memory to the model itself.
+    (OLLAMA_KEEP_ALIVE=30m OLLAMA_MAX_LOADED_MODELS=1 OLLAMA_NUM_PARALLEL=1 OLLAMA_CONTEXT_LENGTH=4096 \
+      ollama serve > "$STATE_DIR/ollama.log" 2>&1 &)
     for _ in $(seq 1 30); do curl -sf "http://localhost:$OLLAMA_PORT/api/version" >/dev/null 2>&1 && break; sleep 1; done
   fi
   curl -sf "http://localhost:$OLLAMA_PORT/api/version" >/dev/null 2>&1 || die "Ollama did not start (see .dev/ollama.log)."
   if ollama list 2>/dev/null | awk '{print $1}' | grep -qx "$LLM"; then info "$LLM already downloaded"
   else info "downloading $LLM (once)"; ollama pull "$LLM"; fi
-  # Load the model now and keep it in memory: otherwise Ollama unloads it after 5 idle minutes and the next
-  # caller waits several seconds while it reloads.
-  (curl -sf "http://localhost:$OLLAMA_PORT/api/generate" -d "{\"model\": \"$LLM\", \"keep_alive\": -1}" \
+  # Load the model now so the first caller doesn't wait; it is freed after 30 idle minutes.
+  (curl -sf "http://localhost:$OLLAMA_PORT/api/generate" -d "{\"model\": \"$LLM\", \"keep_alive\": \"30m\"}" \
     >/dev/null 2>&1 &)
 fi
 
@@ -351,29 +362,54 @@ YAML
     "$STATE_DIR/stt/bin/uvicorn" app:app --host 127.0.0.1 --port "$STT_PORT"
   start tts "$ROOT/services/tts" env TTS_ENGINES=piper PIPER_VOICE_DIR="$MODELS_DIR/piper" \
     "$STATE_DIR/tts/bin/uvicorn" app:app --host 127.0.0.1 --port "$TTS_PORT"
-  start voices "$ROOT" env NEURAL_PORT="$NEURAL_PORT" NEURAL_VOICE_DIR="$MODELS_DIR/neural-voices" \
-    "$ROOT/scripts/voice-mac.sh" --model "$VOICE_MODEL"
+  # Natural voices (~3-5 GB) load only when a cloned/natural voice is used and are freed after 10 idle minutes.
+  if [ "$WITH_NATURAL" = 1 ]; then
+    start voices "$ROOT" env NEURAL_PORT="$NEURAL_PORT" NEURAL_VOICE_DIR="$MODELS_DIR/neural-voices" \
+      NEURAL_PRELOAD=false NEURAL_IDLE_MINUTES="${NEURAL_IDLE_MINUTES:-10}" \
+      "$ROOT/scripts/voice-mac.sh" --model "$VOICE_MODEL"
+  fi
 fi
 
 step "Starting the API on http://localhost:$API_PORT"
-start api "$API_DIR" "$VENV/bin/uvicorn" nexa.main:app --reload --port "$API_PORT"
+if [ "$DEV_MODE" = 1 ]; then
+  start api "$API_DIR" "$VENV/bin/uvicorn" nexa.main:app --reload --port "$API_PORT"
+else
+  start api "$API_DIR" "$VENV/bin/uvicorn" nexa.main:app --port "$API_PORT"
+fi
 wait_for api "http://localhost:$API_PORT/ready" 60 || { tail -30 "$STATE_DIR/api.log"; die "The API did not start (see above)."; }
 info "API ready - docs at http://localhost:$API_PORT/docs"
 
 if [ "$WITH_VOICE" = 1 ]; then
-  start voice-runtime "$ROOT/services/voice-runtime" env VOICE_MAX_CALLS="${VOICE_MAX_CALLS:-4}" \
+  # VOICE_LIGHT: calls run as threads in one process instead of one process (~400 MB) per call.
+  start voice-runtime "$ROOT/services/voice-runtime" env VOICE_MAX_CALLS="${VOICE_MAX_CALLS:-4}" VOICE_LIGHT=1 \
     "$STATE_DIR/voice-runtime/bin/python" -m nexa_voice.main dev
 fi
 
 step "Starting the web app on http://localhost:$WEB_PORT"
-start web "$ROOT/apps/web" npx next dev -p "$WEB_PORT"
+if [ "$DEV_MODE" = 1 ]; then
+  start web "$ROOT/apps/web" npx next dev -p "$WEB_PORT"
+else
+  # The production build uses a fraction of the dev server's memory. Rebuilt only when the web code changed.
+  WEB_STAMP="$STATE_DIR/web-build.sha"
+  WEB_WANT="$( (cd "$ROOT" && find apps/web/src apps/web/next.config.ts apps/web/package.json packages/*/src \
+    -type f -exec shasum {} + 2>/dev/null | sort; echo "$API_INTERNAL_URL") | shasum | cut -d' ' -f1)"
+  if [ ! -f "$ROOT/apps/web/.next/BUILD_ID" ] || [ ! -f "$WEB_STAMP" ] || [ "$(cat "$WEB_STAMP")" != "$WEB_WANT" ]; then
+    info "building the web app (only after code changes; takes a minute or two)"
+    (cd "$ROOT/apps/web" && npx next build > "$STATE_DIR/web-build.log" 2>&1) \
+      || { tail -30 "$STATE_DIR/web-build.log"; die "The web app did not build (see above)."; }
+    echo "$WEB_WANT" > "$WEB_STAMP"
+  fi
+  start web "$ROOT/apps/web" npx next start -p "$WEB_PORT"
+fi
 wait_for web "http://localhost:$WEB_PORT/login" 120 || { tail -30 "$STATE_DIR/web.log"; die "The web app did not start."; }
 
 if [ "$WITH_VOICE" = 1 ]; then
   # Calls placed while the models are still loading are dropped, so wait for them (first start downloads them).
   step "Loading speech models (first start downloads them; can take several minutes)"
-  for svc in "Recognition:$STT_PORT:stt" "Voices:$TTS_PORT:tts" "Natural voices:$NEURAL_PORT:voices"; do
-    label="${svc%%:*}"; rest="${svc#*:}"; port="${rest%%:*}"; log="${rest#*:}"
+  SERVICES="Recognition:$STT_PORT:stt Voices:$TTS_PORT:tts"
+  [ "$WITH_NATURAL" = 1 ] && SERVICES="$SERVICES Natural_voices:$NEURAL_PORT:voices"
+  for svc in $SERVICES; do
+    label="${svc%%:*}"; label="${label//_/ }"; rest="${svc#*:}"; port="${rest%%:*}"; log="${rest#*:}"
     if wait_for "$log" "http://localhost:$port/health" 600; then info "$label ready"
     else info "$label still loading - see .dev/$log.log"; fi
   done
@@ -392,7 +428,11 @@ if [ "$WITH_VOICE" = 1 ]; then
   status "LiveKit       ws://localhost:$LIVEKIT_PORT" "http://localhost:$LIVEKIT_PORT" livekit
   status "Recognition   Whisper ${WHISPER_MODEL:-large-v3-turbo} ($(curl -sf "http://localhost:$STT_PORT/health" | sed -n 's/.*"engine": *"\([^"]*\)".*/\1/p'))" "http://localhost:$STT_PORT/health" stt
   status "Voices        Piper" "http://localhost:$TTS_PORT/health" tts
-  status "Natural voices $VOICE_MODEL" "http://localhost:$NEURAL_PORT/health" voices
+  if [ "$WITH_NATURAL" = 1 ]; then
+    status "Natural voices $VOICE_MODEL (loads when used)" "http://localhost:$NEURAL_PORT/health" voices
+  else
+    printf '    off       Natural voices (--small-pc)\n'
+  fi
 fi
 printf '\n    Open http://localhost:%s - Ctrl+C stops everything.\n' "$WEB_PORT"
 wait

@@ -7,9 +7,11 @@ the live schema; values are always bound parameters.
 
 from __future__ import annotations
 
+import asyncio
 import operator
 import time
 import uuid
+import weakref
 from datetime import date, datetime
 from datetime import time as dtime
 from decimal import Decimal
@@ -36,7 +38,9 @@ class DatabaseToolError(Exception):
 
 COMPARATORS = {"eq": operator.eq, "ne": operator.ne, "lt": operator.lt, "lte": operator.le, "gt": operator.gt,
                "gte": operator.ge}
-_engines: dict[str, tuple[str, AsyncEngine]] = {}
+# integration id -> (url, engine), per event loop (asyncpg connections belong to the loop that opened them).
+_loop_engines: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, dict[str, tuple[str, AsyncEngine]]] = (
+    weakref.WeakKeyDictionary())
 _columns: dict[tuple[str, str, str], dict[str, str]] = {}
 
 
@@ -56,6 +60,7 @@ def build_url(config: dict[str, Any], secrets: dict[str, Any]) -> str:
 
 async def get_engine(integration_id: str, config: dict[str, Any], secrets: dict[str, Any]) -> AsyncEngine:
     url = build_url(config, secrets)
+    _engines = _loop_engines.setdefault(asyncio.get_running_loop(), {})
     cached = _engines.get(integration_id)
     if cached and cached[0] == url:
         return cached[1]
@@ -73,6 +78,7 @@ async def get_engine(integration_id: str, config: dict[str, Any], secrets: dict[
 
 
 async def dispose_all() -> None:
+    _engines = _loop_engines.pop(asyncio.get_running_loop(), {})
     for _, engine in _engines.values():
         await engine.dispose()
     _engines.clear()

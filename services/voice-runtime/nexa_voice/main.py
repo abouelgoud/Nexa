@@ -11,7 +11,7 @@ import urllib.request
 from urllib.parse import urlparse
 from uuid import UUID
 
-from livekit.agents import AgentServer, AgentSession, JobContext, JobProcess, cli
+from livekit.agents import AgentServer, AgentSession, JobContext, JobExecutorType, JobProcess, cli
 from livekit.plugins import silero
 
 from nexa.core.config import get_settings
@@ -62,8 +62,14 @@ def calls_load(worker: AgentServer) -> float:
     return min(len(worker.active_jobs) / MAX_CALLS, 1.0)
 
 
+# VOICE_LIGHT=1 (scripts/dev-mac.sh): run calls as threads in this one process instead of a separate process per call
+# plus pre-started spares (~400 MB each). For a single computer handling a few calls at a time.
+LIGHT = os.getenv("VOICE_LIGHT", "0") == "1"
+_light_options = {"job_executor_type": JobExecutorType.THREAD, "num_idle_processes": 0} if LIGHT else {}
+
 server = AgentServer(ws_url=s.livekit_url, api_key=s.livekit_api_key, api_secret=s.livekit_api_secret,
-                     http_proxy=livekit_proxy(s.livekit_url), **({"load_fnc": calls_load} if MAX_CALLS > 0 else {}))
+                     http_proxy=livekit_proxy(s.livekit_url), **({"load_fnc": calls_load} if MAX_CALLS > 0 else {}),
+                     **_light_options)
 
 
 def prewarm(proc: JobProcess) -> None:

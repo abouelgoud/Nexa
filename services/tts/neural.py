@@ -27,21 +27,20 @@ VOICE_DIR = Path(os.getenv("NEURAL_VOICE_DIR", "/models/neural-voices"))
 DEVICE = os.getenv("NEURAL_DEVICE", "auto")
 MODEL = os.getenv("NEURAL_MODEL", "chatterbox").strip().lower()
 MAX_REFERENCE_SECONDS = 30
+# Free the model's memory after this many idle minutes (0 = keep it loaded); it reloads on the next use.
+IDLE_MINUTES = float(os.getenv("NEURAL_IDLE_MINUTES", "0"))
 _model = None
 _device = None
+_last_used = 0.0
 _lock = threading.Lock()
 SENTENCE_RE = re.compile(r"(?<=[.!?؟؛\n])\s+")
 
 
 def available() -> bool:
-    try:
-        if MODEL == "omnivoice":
-            import omnivoice  # noqa: F401
-        else:
-            import chatterbox  # noqa: F401
-    except ImportError:
-        return False
-    return True
+    # find_spec checks the package is installed without importing it (importing pulls in PyTorch: ~700 MB).
+    import importlib.util
+
+    return importlib.util.find_spec("omnivoice" if MODEL == "omnivoice" else "chatterbox") is not None
 
 
 def loaded() -> bool:
@@ -65,8 +64,9 @@ def best_device() -> str:
 
 
 def engine():
-    global _model, _device
+    global _model, _device, _last_used
     with _lock:
+        _last_used = time.monotonic()
         if _model is None:
             _device = best_device()
             start = time.perf_counter()
@@ -136,6 +136,46 @@ class _OmniVoice:
             return self.tts.generate(text=text, language=language, voice_clone_prompt=self.prepare(voice_id))[0]
         # No reference: a steady designed voice rather than a different random speaker on every turn.
         return self.tts.generate(text=text, language=language, instruct="female, middle-aged")[0]
+
+
+def _unload_when_idle() -> None:
+    global _model
+    while True:
+        time.sleep(30)
+        with _lock:
+            if _model is None or time.monotonic() - _last_used < IDLE_MINUTES * 60:
+                continue
+            _model = None
+        import gc
+
+        gc.collect()
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            elif getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+                torch.mps.empty_cache()
+        except Exception:  # noqa: BLE001 - best effort
+            pass
+        _release_to_os()
+        log.warning("unloaded %s after %.0f idle minutes (reloads on next use)", MODEL, IDLE_MINUTES)
+
+
+def _release_to_os() -> None:
+    """glibc keeps freed memory for reuse; hand it back to the system (Linux). macOS returns large blocks itself."""
+    import ctypes
+    import sys
+
+    if sys.platform.startswith("linux"):
+        try:
+            ctypes.CDLL("libc.so.6").malloc_trim(0)
+        except (OSError, AttributeError):
+            pass
+
+
+if IDLE_MINUTES > 0:
+    threading.Thread(target=_unload_when_idle, daemon=True, name="neural-idle-unload").start()
 
 
 def list_voices() -> list[dict]:

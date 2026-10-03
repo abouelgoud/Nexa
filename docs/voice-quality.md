@@ -69,16 +69,27 @@ Where the time goes is shown per turn on the call page ("recognized in", "answer
   decoding (`WHISPER_BEAM_SIZE=1`), which was as accurate as beam search on our Arabic call tests (13.4% vs 13.9% word
   errors) and ~30% faster. If it's still slow on an older Mac: `WHISPER_MODEL=small scripts/dev-mac.sh` (faster,
   less accurate).
-* **LLM**: `scripts/dev-mac.sh` loads the model at startup and keeps it in memory (Ollama otherwise unloads it after
-  5 idle minutes and the next caller waits while it reloads). The default is
-  `qwen3:4b-instruct` (2.5 GB): half the size of `qwen3:8b`, so roughly twice as fast, with no hidden reasoning pass, and it got all of
-  our Arabic checks right (booking tool call, answering from clinic information, recognising a cancellation), which
-  `qwen3:0.6b`/`1.7b` did not. Avoid plain `qwen3:4b` in Ollama: it is now a reasoning-only model that "thinks"
-  before every reply. Reasoning is switched off for hybrid models such as `qwen3:8b`.
+* **LLM**: the default is `qwen2.5:3b` (~2.1 GB in memory): it got all of our Arabic call checks right (booking
+  tool call, answering from clinic information, recognising a cancellation), as did `qwen3:4b-instruct` (~3.1 GB,
+  slower); `qwen2.5:1.5b` and `qwen3:1.7b` got two of three wrong. Avoid plain `qwen3:4b` in Ollama: it is
+  reasoning-only and "thinks" before every reply (reasoning is switched off for hybrid models like `qwen3:8b`).
+  `scripts/dev-mac.sh` loads the model at startup and Ollama frees it after 30 idle minutes.
 * **Voice**: natural/cloned voices render each sentence; repeated phrases (greeting, "لحظة من فضلك", common
   questions) are cached and replay instantly, and "one moment" is pre-rendered for each call's voice. The standard
   voice (Piper) is the fastest. When checking takes longer than 0.9 s the agent says "لحظة من فضلك" instead of
   staying silent.
+
+## Memory (scripts/dev-mac.sh, measured)
+
+| | Default | `--small-pc` |
+|---|---|---|
+| Speech recognition | 1.75 GB (Whisper large-v3-turbo) | 0.78 GB (Whisper small: 17.8% vs 13.4% word errors on our Arabic tests) |
+| LLM (while loaded; freed after 30 idle min) | 2.1 GB (qwen2.5:3b) | same |
+| Natural voices | 0.08 GB until used; ~4.9 GB while in use; freed after 10 idle min | off |
+| Everything else (web app, API, call worker, Piper, PostgreSQL, LiveKit) | ~1.1 GB | ~1.6 GB |
+
+Calls run as threads in one worker process (`VOICE_LIGHT=1`) instead of one ~400 MB process per call, and the web
+app runs as a production build (`--dev` switches to the hot-reloading dev server, which uses more).
 
 ## Measured in development (CPU, synthetic test speech)
 
