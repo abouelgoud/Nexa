@@ -86,6 +86,24 @@ if [ "$USE_BREW" = 1 ]; then
 
   PG_BIN="$(brew --prefix "$PG_FORMULA")/bin"
   info "using $PG_FORMULA"
+  # Another PostgreSQL service on port 5432 would keep this one from starting (and lacks pgvector).
+  OTHER_PG="$(brew services list 2>/dev/null | awk -v want="$PG_FORMULA" \
+    '$2 == "started" && $1 ~ /^postgresql(@[0-9]+)?$/ && $1 != want {print $1}' || true)"
+  if [ -n "$OTHER_PG" ]; then
+    info "another PostgreSQL is running: $(echo $OTHER_PG). It uses port 5432, which $PG_FORMULA needs."
+    answer=n
+    if [ -t 0 ]; then
+      printf '    Stop it so Nexa can use %s? Its data is kept; restart it any time with brew services start. [y/N] ' "$PG_FORMULA"
+      read -r answer || answer=n
+    fi
+    case "$answer" in
+      y|Y|yes|YES)
+        for other in $OTHER_PG; do info "stopping $other"; brew services stop "$other" >/dev/null; done
+        brew services stop "$PG_FORMULA" >/dev/null 2>&1 || true  # may have failed to start while the port was taken
+        ;;
+      *) die "Stop the other PostgreSQL first (brew services stop $(echo $OTHER_PG)), then run this script again." ;;
+    esac
+  fi
   if ! brew services list | grep -E "^${PG_FORMULA}[[:space:]]+started" >/dev/null; then
     info "starting $PG_FORMULA"
     brew services start "$PG_FORMULA" >/dev/null
@@ -130,8 +148,15 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 "$PSQL" -d postgres -Atqc "SELECT 1" >/dev/null 2>&1 \
-  || die "Cannot connect to PostgreSQL as '$(whoami)'. Is it running? (brew services list)"
-info "connected"
+  || die "Cannot connect to PostgreSQL as '$(whoami)'. Is it running? (brew services list; logs: $(brew --prefix 2>/dev/null)/var/log/$PG_FORMULA.log)"
+SERVER_MAJOR="$("$PSQL" -d postgres -Atqc "SELECT current_setting('server_version_num')::int / 10000")"
+info "connected to PostgreSQL $SERVER_MAJOR"
+if [ "$USE_BREW" = 1 ] && [ "$SERVER_MAJOR" != "${PG_FORMULA#postgresql@}" ]; then
+  LISTENER="$(lsof -nP -iTCP:5432 -sTCP:LISTEN 2>/dev/null | awk 'NR == 2 {print $1 " (pid " $2 ")"}')"
+  die "Port 5432 is taken by another PostgreSQL $SERVER_MAJOR${LISTENER:+ - $LISTENER}, so $PG_FORMULA (which has pgvector) could not start.
+       Stop it first: Postgres.app -> Stop; Docker -> docker compose down; Homebrew -> brew services stop <name>.
+       Then run this script again."
+fi
 
 sql() { "$PSQL" -v ON_ERROR_STOP=1 -q "$@"; }
 
@@ -153,8 +178,10 @@ for db in nexa clinic_demo; do
   fi
 done
 sql -d nexa -c "ALTER DATABASE nexa OWNER TO nexa" -c "ALTER SCHEMA public OWNER TO nexa"
-sql -d nexa -c "CREATE EXTENSION IF NOT EXISTS vector" 2>/dev/null \
-  || die "The pgvector extension is not available for this PostgreSQL. With Homebrew, pgvector must match the PostgreSQL version (brew info pgvector)."
+if ! PGV_ERR="$(sql -d nexa -c "CREATE EXTENSION IF NOT EXISTS vector" 2>&1)"; then
+  printf '    %s\n' "$PGV_ERR"
+  die "pgvector is not installed for PostgreSQL $SERVER_MAJOR. Fix: brew reinstall pgvector (it supports: $(echo ${PG_SUPPORTED:-see brew info pgvector})), then run this script again."
+fi
 info "platform database: nexa (pgvector enabled)"
 
 sql -d clinic_demo -f "$ROOT/infrastructure/postgres/clinic_demo.sql" 2>&1 | grep -v NOTICE || true
