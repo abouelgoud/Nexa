@@ -50,6 +50,7 @@ x-api-env: &api-env
   LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-devsecret_devsecret_devsecret_devsecret}
   DEMO_CLINIC_DATABASE_URL: postgresql://clinic_agent:${CLINIC_DB_PASSWORD:-clinic_agent}@postgres:5432/clinic_demo
   JOBS_INLINE: ${JOBS_INLINE:-true}            # documents are processed in the API (no worker needed)
+  RECORDINGS_DIR: /data/recordings              # call recordings (agent setting: Privacy -> record calls)
   ALLOW_PRIVATE_NETWORK_INTEGRATIONS: ${ALLOW_PRIVATE_NETWORK_INTEGRATIONS:-true}
   OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
 
@@ -89,6 +90,7 @@ services:
     environment: *api-env
     ports: ["${API_PORT:-8000}:8000"]
     extra_hosts: ["host.docker.internal:host-gateway"]  # reach an LLM / voice service running natively
+    volumes: [recordings:/data/recordings]
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -159,6 +161,7 @@ services:
       VOICE_LIGHT: "1"                          # calls run as threads in one process (not a process per call)
       VOICE_MAX_CALLS: ${VOICE_MAX_CALLS:-4}   # capacity in calls, not CPU load (a busy CPU must not refuse calls)
     extra_hosts: ["host.docker.internal:host-gateway"]
+    volumes: [recordings:/data/recordings]
     depends_on: [livekit, api, stt, tts]
     mem_limit: 1g
     restart: unless-stopped
@@ -261,3 +264,4 @@ volumes:
   models:
   hf-cache:
   llm-models:
+  recordings:

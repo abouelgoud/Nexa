@@ -1,9 +1,12 @@
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 
+from nexa.core.config import get_settings
 from nexa.core.deps import TenantContext, get_tenant_context
 from nexa.core.errors import NotFound
 from nexa.models import (
@@ -83,7 +86,28 @@ async def call_detail(call_id: UUID, ctx: TenantContext = Depends(get_tenant_con
                     "created_at": e.created_at.isoformat()} for e in events],
         "workflow": {"status": wx.status, "current_node": wx.current_node, "path": wx.path, "variables": wx.variables}
         if wx else None,
+        "has_recording": recording_file(call) is not None,
     }
+
+
+def recording_file(call: Call) -> Path | None:
+    """The call's recording on disk, if it was recorded and still exists (never outside the recordings folder)."""
+    if not call.recording_uri:
+        return None
+    root = Path(get_settings().recordings_dir).resolve()
+    path = (root / call.recording_uri).resolve()
+    return path if path.is_relative_to(root) and path.is_file() else None
+
+
+@router.get("/calls/{call_id}/recording")
+async def call_recording(call_id: UUID, ctx: TenantContext = Depends(get_tenant_context)) -> FileResponse:
+    call = await ctx.db.get(Call, call_id)
+    if call is None or call.tenant_id != ctx.tenant_id:
+        raise NotFound("Call not found.")
+    path = recording_file(call)
+    if path is None:
+        raise NotFound("This call has no recording.")
+    return FileResponse(path, media_type="audio/ogg", filename=f"call-{call.id}.ogg")
 
 
 @router.get("/conversations/{call_id}")

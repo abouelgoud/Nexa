@@ -39,3 +39,9 @@ async def save_graph(ctx: TenantContext, wf: Workflow, graph: WorkflowGraph) -> 
                                 target_key=e.target, handle=e.handle, condition=e.condition, label=e.label))
     wf.revision += 1
     wf.updated_by = ctx.user.id
+
+
+async def graph_dict(db, workflow_id: UUID) -> dict:
+    """Node configs of a workflow, for background jobs that run outside a request (e.g. voice pre-rendering)."""
+    nodes = (await db.scalars(select(WorkflowNode).where(WorkflowNode.workflow_id == workflow_id))).all()
+    return {"nodes": [{"id": n.node_key, "type": n.node_type, "config": n.config or {}} for n in nodes]}

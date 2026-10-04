@@ -91,6 +91,7 @@ export interface CallDetail {
   messages: { seq: number; role: string; content: string; original_text: string | null; normalized_text: string | null;
     language: string | null; dialect: string | null; metadata: Record<string, any>; created_at: string }[];
   transcripts: unknown[];
+  has_recording?: boolean;
   tool_executions: { id: string; tool_name: string; category: string; source: string; arguments: Record<string, any>;
     result: Record<string, any> | null; status: string; error: string | null; latency_ms: number | null;
     requires_confirmation: boolean; confirmed: boolean; created_at: string }[];

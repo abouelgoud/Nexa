@@ -15,11 +15,11 @@ from livekit.agents.voice import ModelSettings
 
 from nexa.core.db import get_sessionmaker
 from nexa.runtime.session import ConversationRuntime, TurnResult
+from nexa.services.speech_cache import FILLERS  # shared with pre-rendering, so the cache matches
 
 log = logging.getLogger("nexa.voice")
 
 
-FILLERS = {"ar": "لحظة من فضلك.", "en": "One moment, please."}
 FILLER_AFTER_SECONDS = 0.9
 
 

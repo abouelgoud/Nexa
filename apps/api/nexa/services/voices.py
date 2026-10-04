@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import re
+
 from nexa.providers.tts.azure import DIALECT_VOICES, ENGLISH_VOICES, voice_for_dialect
 from nexa.schemas.agent_definition import DIALECT_LABELS, AgentDefinition
 
 PIPER_DEFAULTS = {"ar": "ar_JO-kareem-medium", "en": "en_US-amy-medium"}
+
+
+# Piper voice ids look like "en_US-amy-medium"; another engine can't use them (left over from the default voice).
+_PIPER_ID = re.compile(r"^[a-z]{2}_[A-Z]{2}-")
 
 
 def resolve_voice(defn: AgentDefinition, language: str, dialect: str | None) -> tuple[str, str]:
@@ -13,7 +19,8 @@ def resolve_voice(defn: AgentDefinition, language: str, dialect: str | None) -> 
     v = defn.voice
     provider = "local" if v.provider == "piper" else v.provider
     if language == "en":
-        if v.english_voice_id and not v.english_voice_id.startswith("default"):
+        if v.english_voice_id and not v.english_voice_id.startswith("default") and not (
+                provider in ("neural", "elevenlabs", "azure") and _PIPER_ID.match(v.english_voice_id)):
             return provider, v.english_voice_id
         if provider == "azure":
             return provider, ENGLISH_VOICES[v.gender]

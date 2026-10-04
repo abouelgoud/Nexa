@@ -3,11 +3,21 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from nexa.core.config import get_settings
 from nexa.models import AgentVersion, Call, CallEvent, Conversation, Message, Transcript
+
+
+def delete_recordings(uris: list[str]) -> None:
+    root = Path(get_settings().recordings_dir).resolve()
+    for uri in uris:
+        path = (root / uri).resolve()
+        if path.is_relative_to(root):
+            path.unlink(missing_ok=True)
 
 
 async def cleanup(db: AsyncSession) -> dict[str, int]:
@@ -23,6 +33,9 @@ async def cleanup(db: AsyncSession) -> dict[str, int]:
         r2 = await db.execute(delete(Message).where(Message.conversation_id.in_(conv_ids)))
         await db.execute(delete(CallEvent).where(CallEvent.call_id.in_(call_ids)))
         await db.execute(update(Conversation).where(Conversation.call_id.in_(call_ids)).values(state={}))
+        recorded = (await db.execute(select(Call.recording_uri).where(Call.id.in_(call_ids),
+                                                                       Call.recording_uri.is_not(None)))).scalars()
+        delete_recordings(list(recorded))  # the audio itself, not just the reference
         await db.execute(update(Call).where(Call.id.in_(call_ids), Call.recording_uri.is_not(None))
                          .values(recording_uri=None))
         purged += (r1.rowcount or 0) + (r2.rowcount or 0)

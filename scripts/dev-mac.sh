@@ -297,6 +297,7 @@ export LIVEKIT_URL="ws://localhost:$LIVEKIT_PORT" LIVEKIT_API_URL="http://localh
 export LIVEKIT_PUBLIC_URL="ws://localhost:$LIVEKIT_PORT"
 export LIVEKIT_API_KEY=devkey LIVEKIT_API_SECRET=devsecret_devsecret_devsecret_devsecret
 MODELS_DIR="$STATE_DIR/models"
+export RECORDINGS_DIR="$STATE_DIR/recordings"
 export CORS_ORIGINS="[\"http://localhost:$WEB_PORT\"]"
 export API_INTERNAL_URL="http://localhost:$API_PORT"
 unset NEXT_PUBLIC_API_URL || true

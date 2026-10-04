@@ -7,7 +7,9 @@ import asyncio
 import json
 import logging
 import os
+import shutil
 import urllib.request
+from pathlib import Path
 from urllib.parse import urlparse
 from uuid import UUID
 
@@ -29,6 +31,30 @@ log = logging.getLogger("nexa.voice")
 AGENT_NAME = "nexa-voice"
 
 s = get_settings()
+
+
+async def save_recording(session: AgentSession, tenant_id: UUID, call_id: UUID) -> str | None:
+    """Finish the call's recording and move it to the recordings folder; returns its path relative to it."""
+    recorder = getattr(session, "_recorder_io", None)
+    if recorder is None:
+        return None
+    try:
+        await recorder.aclose()
+        source = recorder.output_path
+        if source is None or not source.exists():
+            return None
+        relative = f"{tenant_id}/{call_id}.ogg"
+        target = Path(s.recordings_dir) / relative
+        await asyncio.to_thread(_move, source, target)
+        return relative
+    except Exception:  # noqa: BLE001 - the call itself must still be closed properly
+        log.exception("could not save the call recording")
+        return None
+
+
+def _move(source: Path, target: Path) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(source), str(target))
 
 
 def livekit_proxy(url: str) -> str | None:
@@ -128,11 +154,21 @@ async def entrypoint(ctx: JobContext) -> None:
                                        keywords=stt_keywords(defn), languages=[getattr(lang, "value", lang) for lang in defn.languages]),
                            llm=RuntimeLLM(), tts=voice_tts, vad=ctx.proc.userdata["vad"], turn_handling=TURN_HANDLING)
 
+    record = bool(defn.privacy.record_calls)
+    finished = False
+
     async def finish(reason: str = "caller_hangup") -> None:
+        nonlocal finished
+        if finished:
+            return
+        finished = True
+        recording = await save_recording(session, tenant_id, call_id) if record else None
         async with get_sessionmaker()() as db:
             rt = await ConversationRuntime.load(db, call_id, tenant_id)
             if rt:
                 await rt.end(reason)
+                if recording:
+                    rt.call.recording_uri = recording
                 await db.commit()
 
     ctx.add_shutdown_callback(finish)
@@ -181,7 +217,9 @@ async def entrypoint(ctx: JobContext) -> None:
         await finish("transferred" if action["type"] == "transfer" else "agent_ended")
         ctx.shutdown(action["type"])
 
-    await session.start(agent=agent, room=ctx.room)
+    # Recording (agent setting): caller and agent on separate stereo channels, only what was actually heard.
+    await session.start(agent=agent, room=ctx.room,
+                        record={"audio": True, "traces": False, "logs": False, "transcript": False} if record else False)
     for reply in opening.replies:
         session.say(reply, allow_interruptions=True)
 

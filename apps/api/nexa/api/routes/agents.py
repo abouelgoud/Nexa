@@ -21,6 +21,7 @@ from nexa.schemas.tool_definition import ToolDefinition
 from nexa.schemas.workflow import WorkflowGraph
 from nexa.services import agents as svc
 from nexa.services.audit import audit
+from nexa.services.speech_cache import schedule_warm
 from nexa.services.tools import create_tool, get_integration, update_tool
 from nexa.services.workflows import save_graph
 from nexa.templates.catalog import TEMPLATES, get_template
@@ -92,6 +93,7 @@ async def update_config(agent_id: UUID, config: dict[str, Any], ctx: TenantConte
     audit(ctx, "agent.update_draft", "agent", agent.id)
     await ctx.db.commit()
     await ctx.db.refresh(agent)
+    schedule_warm(ctx.tenant_id, agent.id)  # pre-render fixed lines in a natural voice (no-op for other voices)
     return agent
 
 
@@ -208,6 +210,7 @@ async def setup_template(agent_id: UUID, body: TemplateSetupIn, ctx: TenantConte
     audit(ctx, "agent.template_setup", "agent", agent.id, {"template": template.key})
     await ctx.db.commit()
     await ctx.db.refresh(agent)
+    schedule_warm(ctx.tenant_id, agent.id)
     return agent
 
 

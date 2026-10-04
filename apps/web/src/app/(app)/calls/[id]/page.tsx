@@ -3,8 +3,10 @@
 import { Badge, Card, CardContent, CardHeader, CardTitle, Spinner, cn } from "@nexa/ui";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { useEffect, useState } from "react";
 
 import { PageHeader } from "@/components/app-shell";
+import { API_URL, session } from "@/lib/api";
 import { OUTCOME_VARIANT, dialectName, duration, formatDate } from "@/lib/format";
 import { useCall } from "@/lib/queries";
 
@@ -69,6 +71,7 @@ export default function CallDetailPage() {
           </Card>
         </div>
         <div className="space-y-6">
+          {data.has_recording && <Recording callId={c.id} />}
           <Card>
             <CardHeader><CardTitle className="text-sm">Summary</CardTitle></CardHeader>
             <CardContent className="space-y-2 text-sm">
@@ -110,4 +113,24 @@ export default function CallDetailPage() {
 
 function seconds(ms: number): string {
   return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`;
+}
+
+/** The call recording (caller and agent on separate stereo channels), fetched with the user's credentials. */
+function Recording({ callId }: { callId: string }) {
+  const [src, setSrc] = useState<string | null>(null);
+  useEffect(() => {
+    let url: string | null = null;
+    void fetch(`${API_URL}/calls/${callId}/recording`, {
+      headers: { Authorization: `Bearer ${session.token}`, "X-Tenant-ID": session.tenant ?? "" },
+    }).then(async (res) => {
+      if (res.ok) { url = URL.createObjectURL(await res.blob()); setSrc(url); }
+    });
+    return () => { if (url) URL.revokeObjectURL(url); };
+  }, [callId]);
+  return (
+    <Card>
+      <CardHeader><CardTitle className="text-sm">Recording</CardTitle></CardHeader>
+      <CardContent>{src ? <audio controls src={src} className="w-full" data-testid="call-recording" /> : <Spinner />}</CardContent>
+    </Card>
+  );
 }

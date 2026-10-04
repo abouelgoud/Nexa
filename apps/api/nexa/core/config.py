@@ -78,6 +78,8 @@ class Settings(BaseSettings):
 
     # Run background jobs (document ingestion) in-process instead of via the Redis queue/worker.
     jobs_inline: bool = False
+    # Call recordings (agent setting Privacy -> record calls), shared by the call worker and the API.
+    recordings_dir: str = "/data/recordings"
     max_upload_bytes: int = 20_000_000
 
     max_agent_tool_iterations: int = 4

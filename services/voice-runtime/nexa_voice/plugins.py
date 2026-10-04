@@ -13,8 +13,10 @@ from livekit.agents import APIConnectionError, llm, stt, tts, utils
 from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, NOT_GIVEN, APIConnectOptions, NotGivenOr
 
 from nexa.core.observability import STT_LATENCY, TTS_LATENCY
+from nexa.providers.audio import wav_pcm
 from nexa.providers.stt.base import STTError, STTProvider
 from nexa.providers.tts.base import TTSError, TTSProvider
+from nexa.services.speech_cache import speech_chunks
 
 log = logging.getLogger("nexa.voice")
 
@@ -67,6 +69,8 @@ class NexaTTS(tts.TTS):
                  sample_rate: int = 22050):
         super().__init__(capabilities=tts.TTSCapabilities(streaming=False), sample_rate=sample_rate, num_channels=1)
         self._provider = provider
+        # Slow, high-quality voices are streamed phrase by phrase (see _run_phrases).
+        self.phrase_streaming = getattr(provider, "name", "") == "neural"
         self.voice_id = voice_id
         self.language = language
         self.speed = speed
@@ -82,6 +86,9 @@ class _NexaChunkedStream(tts.ChunkedStream):
 
     async def _run(self, output_emitter: tts.AudioEmitter) -> None:
         t = self._nexa_tts
+        if t.phrase_streaming:
+            await self._run_phrases(output_emitter)
+            return
         start = time.perf_counter()
         try:
             result = await t._provider.synthesize(self.input_text, voice_id=t.voice_id, language=t.language, speed=t.speed)
@@ -92,6 +99,27 @@ class _NexaChunkedStream(tts.ChunkedStream):
                                   mime_type="audio/wav")
         output_emitter.push(result.audio)
         output_emitter.flush()
+
+    async def _run_phrases(self, output_emitter: tts.AudioEmitter) -> None:
+        """Natural voices: render short phrases one after another and play each as soon as it is ready, so the
+        caller hears the first words after one short phrase instead of after the whole sentence."""
+        t = self._nexa_tts
+        started = False
+        for phrase in speech_chunks(self.input_text):
+            start = time.perf_counter()
+            try:
+                result = await t._provider.synthesize(phrase, voice_id=t.voice_id, language=t.language, speed=t.speed)
+            except TTSError as exc:
+                raise APIConnectionError(str(exc)) from exc
+            TTS_LATENCY.observe(time.perf_counter() - start)
+            pcm, rate, channels = wav_pcm(result.audio)
+            if not started:
+                output_emitter.initialize(request_id=uuid.uuid4().hex, sample_rate=rate, num_channels=channels,
+                                          mime_type="audio/pcm")
+                started = True
+            output_emitter.push(pcm)
+        if started:
+            output_emitter.flush()
 
 
 class RuntimeLLM(llm.LLM):

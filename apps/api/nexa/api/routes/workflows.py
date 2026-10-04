@@ -13,6 +13,7 @@ from nexa.models import Tool, Workflow
 from nexa.schemas.tool_definition import builtin_tools
 from nexa.schemas.workflow import NODE_HANDLES, WorkflowGraph, validate_workflow
 from nexa.services.audit import audit
+from nexa.services.speech_cache import schedule_warm
 from nexa.services.workflows import get_workflow, load_graph, save_graph
 
 router = APIRouter(prefix="/workflows", tags=["workflows"])
@@ -76,6 +77,8 @@ async def put_graph(workflow_id: UUID, graph: dict[str, Any], ctx: TenantContext
     await save_graph(ctx, wf, parsed)
     audit(ctx, "workflow.update", "workflow", wf.id, {"revision": wf.revision})
     await ctx.db.commit()
+    if wf.agent_id:
+        schedule_warm(ctx.tenant_id, wf.agent_id)  # its questions may have changed
     return {"revision": wf.revision,
             "issues": [i.model_dump() for i in validate_workflow(parsed, await _tool_names(ctx))]}
 

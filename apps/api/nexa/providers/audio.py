@@ -52,3 +52,9 @@ def to_wav_mono(data: bytes, target_rate: int = 16000) -> bytes:
 
 def is_wav(data: bytes) -> bool:
     return data[:4] == b"RIFF" and data[8:12] == b"WAVE"
+
+
+def wav_pcm(data: bytes) -> tuple[bytes, int, int]:
+    """(16-bit PCM frames, sample rate, channels) of a WAV file."""
+    with wave.open(io.BytesIO(data)) as w:
+        return w.readframes(w.getnframes()), w.getframerate(), w.getnchannels()

@@ -20,6 +20,7 @@ from nexa.providers.tts.base import TTSError
 from nexa.runtime.session import ConversationRuntime, TurnResult
 from nexa.schemas.agent_definition import AgentDefinition
 from nexa.services.agents import create_snapshot, get_agent
+from nexa.services.speech_cache import synthesize_phrased
 from nexa.services.usage import record_usage
 from nexa.services.voices import resolve_voice, stt_keywords
 
@@ -37,7 +38,10 @@ async def _speak(ctx: TenantContext, rt: ConversationRuntime, result: TurnResult
     clips = []
     for text in result.replies:
         try:
-            r = await tts.synthesize(text, voice_id=voice, language=rt.lang, speed=defn.voice.speed)
+            if provider == "neural":  # same phrases as live calls, so pre-rendered lines come from the cache
+                r = await synthesize_phrased(tts, text, voice_id=voice, language=rt.lang, speed=defn.voice.speed)
+            else:
+                r = await tts.synthesize(text, voice_id=voice, language=rt.lang, speed=defn.voice.speed)
         except TTSError as exc:
             return [{"error": str(exc)}]
         TTS_LATENCY.observe(r.latency_ms / 1000)

@@ -10,6 +10,7 @@ import { ErrorBox } from "@/components/error-box";
 import { get, post } from "@/lib/api";
 import { dialectName } from "@/lib/format";
 
+type Caption = { id: string; who: "caller" | "agent"; text: string; final: boolean };
 type RoomLike = { disconnect: () => Promise<void>; startAudio: () => Promise<void>; canPlaybackAudio: boolean };
 
 /**
@@ -26,6 +27,9 @@ export function RealtimeTest({ agentId, use }: { agentId: string; use: "draft" |
   const [agentJoined, setAgentJoined] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [audioBlocked, setAudioBlocked] = useState(false);
+  // Live captions pushed by the voice agent over LiveKit (no polling): the agent's words as they are spoken,
+  // the caller's as soon as they are recognised.
+  const [captions, setCaptions] = useState<Caption[]>([]);
   const [error, setError] = useState<unknown>(null);
   const audioHost = useRef<HTMLDivElement>(null);
 
@@ -65,6 +69,20 @@ export function RealtimeTest({ agentId, use }: { agentId: string; use: "draft" |
       const { Room, RoomEvent, Track } = await import("livekit-client");
       const info = await post<{ url: string; token: string; room: string }>("/test/realtime", { agent_id: agentId, use });
       const r = new Room({ adaptiveStream: true, dynacast: true });
+      setCaptions([]);
+      r.registerTextStreamHandler("lk.transcription", async (reader, participant) => {
+        const id = reader.info.attributes?.["lk.segment_id"] ?? reader.info.id;
+        const who: Caption["who"] = participant.identity === r.localParticipant.identity ? "caller" : "agent";
+        const show = (text: string, final: boolean) => setCaptions((list) => {
+          const next = list.filter((c) => c.id !== id);
+          const at = list.findIndex((c) => c.id === id);
+          next.splice(at < 0 ? next.length : at, 0, { id, who, text, final });
+          return next;
+        });
+        let text = "";
+        for await (const chunk of reader) { text += chunk; show(text, false); }
+        show(text, true);
+      });
       r.on(RoomEvent.TrackSubscribed, (track) => {
         if (track.kind === Track.Kind.Audio) audioHost.current?.appendChild(track.attach());
       });
@@ -121,8 +139,14 @@ export function RealtimeTest({ agentId, use }: { agentId: string; use: "draft" |
             </Button>
           )}
           <ErrorBox error={error} />
-          <div className="h-[380px] space-y-2 overflow-y-auto rounded-lg bg-muted/40 p-3">
-            {detail?.messages.map((m) => (
+          <div className="h-[380px] space-y-2 overflow-y-auto rounded-lg bg-muted/40 p-3" aria-live="polite">
+            {captions.filter((c) => c.text.trim()).map((c) => (
+              <div key={c.id} className={cn("flex", c.who === "caller" ? "justify-end" : "justify-start")} data-testid="caption">
+                <div dir="auto" className={cn("max-w-[80%] rounded-2xl px-3 py-2 text-sm",
+                  c.who === "caller" ? "bg-primary text-primary-foreground" : "border bg-card", !c.final && "opacity-80")}>{c.text}</div>
+              </div>
+            ))}
+            {captions.length === 0 && detail?.messages.map((m) => (
               <div key={m.seq} className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}>
                 <div dir="auto" className={cn("max-w-[80%] rounded-2xl px-3 py-2 text-sm", m.role === "user" ? "bg-primary text-primary-foreground" : "border bg-card")}>{m.content}</div>
               </div>

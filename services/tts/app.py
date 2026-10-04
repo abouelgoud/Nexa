@@ -13,6 +13,7 @@ GET  /voices, /health
 
 from __future__ import annotations
 
+import hashlib
 import io
 import logging
 import os
@@ -123,10 +124,45 @@ _cache_lock = threading.Lock()
 CACHE_SIZE = int(os.getenv("NEURAL_CACHE_SIZE", "200"))
 
 
+# Also on disk, so pre-rendered phrases (an agent's greeting and questions) survive restarts.
+DISK_CACHE = Path(os.getenv("NEURAL_CACHE_DIR", str(neural.VOICE_DIR / "cache")))
+DISK_CACHE_FILES = int(os.getenv("NEURAL_CACHE_FILES", "5000"))
+
+
+def _disk_path(key: tuple[str, str, str]) -> Path:
+    digest = hashlib.sha1(f"{key[1]}|{key[2]}".encode()).hexdigest()[:20]
+    return DISK_CACHE / f"{key[0]}__{digest}.wav"
+
+
+def _disk_get(key: tuple[str, str, str]) -> tuple[bytes, int] | None:
+    path = _disk_path(key)
+    if not path.exists():
+        return None
+    data = path.read_bytes()
+    with wave.open(io.BytesIO(data)) as w:
+        rate = w.getframerate()
+    path.touch()  # most recently used
+    return data, rate
+
+
+def _disk_put(key: tuple[str, str, str], audio: bytes) -> None:
+    try:
+        DISK_CACHE.mkdir(parents=True, exist_ok=True)
+        _disk_path(key).write_bytes(audio)
+        files = list(DISK_CACHE.glob("*.wav"))
+        if len(files) > DISK_CACHE_FILES:
+            for old in sorted(files, key=lambda f: f.stat().st_mtime)[: len(files) - DISK_CACHE_FILES]:
+                old.unlink(missing_ok=True)
+    except OSError:
+        log.warning("could not write the voice cache", exc_info=True)
+
+
 def _forget_voice(voice_id: str) -> None:
     with _cache_lock:
         for key in [k for k in _cache if k[0] == voice_id]:
             del _cache[key]
+    for path in DISK_CACHE.glob(f"{voice_id}__*.wav"):
+        path.unlink(missing_ok=True)
 
 
 @app.post("/voices/clone")
@@ -163,6 +199,11 @@ def synthesize(req: SynthesisRequest) -> Response:
             hit = _cache.get(key)
             if hit:
                 _cache.move_to_end(key)
+        if not hit:
+            hit = _disk_get(key)
+            if hit:
+                with _cache_lock:
+                    _cache[key] = hit
         if hit:
             audio, rate = hit
         else:
@@ -174,6 +215,7 @@ def synthesize(req: SynthesisRequest) -> Response:
                 _cache[key] = (audio, rate)
                 while len(_cache) > CACHE_SIZE:
                     _cache.popitem(last=False)
+            _disk_put(key, audio)
         return Response(audio, media_type="audio/wav", headers={
             "x-sample-rate": str(rate), "x-voice": key[0], "x-engine": "neural", "x-cache": "hit" if hit else "miss",
             "x-synthesis-ms": str(round((time.perf_counter() - start) * 1000, 1))})
