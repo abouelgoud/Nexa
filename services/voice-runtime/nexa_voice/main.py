@@ -143,7 +143,9 @@ async def entrypoint(ctx: JobContext) -> None:
                         thinking_fillers=defn.voice.thinking_fillers)
     provider, voice_id = resolve_voice(defn, handle.language, None)
     tts_provider = get_tts(provider) or get_tts()
-    voice_tts = NexaTTS(tts_provider, voice_id, handle.language, defn.voice.speed)
+    # The session plays at one rate: the engine's own (natural voices 24 kHz, Piper 22.05 kHz).
+    voice_tts = NexaTTS(tts_provider, voice_id, handle.language, defn.voice.speed,
+                        sample_rate=24000 if getattr(tts_provider, "name", "") == "neural" else 22050)
 
     def switch_voice(language: str, dialect: str | None) -> None:
         voice_tts.language = language
@@ -172,6 +174,15 @@ async def entrypoint(ctx: JobContext) -> None:
                 await db.commit()
 
     ctx.add_shutdown_callback(finish)
+
+    @session.on("close")
+    def _on_close(ev) -> None:
+        # The caller hung up: close the call (and save its recording) now, not when LiveKit later ends the job.
+        async def close_call() -> None:
+            await finish("caller_hangup")
+            ctx.shutdown("call ended")
+
+        asyncio.create_task(close_call())
 
     @session.on("metrics_collected")
     def _on_metrics(ev) -> None:

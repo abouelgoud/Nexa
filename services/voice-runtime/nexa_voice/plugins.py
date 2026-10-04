@@ -32,6 +32,19 @@ def frames_to_wav(buffer: utils.AudioBuffer) -> bytes:
     return out.getvalue()
 
 
+def resample_pcm16(pcm: bytes, rate: int, target: int, channels: int = 1) -> bytes:
+    """Mono 16-bit PCM at ``target`` Hz (linear interpolation; voices are band-limited well below Nyquist)."""
+    import numpy as np
+
+    x = np.frombuffer(pcm, dtype="<i2").astype(np.float32)
+    if channels > 1:
+        x = x.reshape(-1, channels).mean(axis=1)
+    if rate != target and len(x):
+        n = int(round(len(x) * target / rate))
+        x = np.interp(np.linspace(0, len(x) - 1, n), np.arange(len(x)), x)
+    return np.clip(x, -32768, 32767).astype("<i2").tobytes()
+
+
 class NexaSTT(stt.STT):
     """Non-streaming STT; AgentSession pairs it with VAD to segment caller utterances."""
 
@@ -113,8 +126,10 @@ class _NexaChunkedStream(tts.ChunkedStream):
                 raise APIConnectionError(str(exc)) from exc
             TTS_LATENCY.observe(time.perf_counter() - start)
             pcm, rate, channels = wav_pcm(result.audio)
+            if channels != 1 or rate != t.sample_rate:  # the session plays at one fixed rate
+                pcm = resample_pcm16(pcm, rate, t.sample_rate, channels)
             if not started:
-                output_emitter.initialize(request_id=uuid.uuid4().hex, sample_rate=rate, num_channels=channels,
+                output_emitter.initialize(request_id=uuid.uuid4().hex, sample_rate=t.sample_rate, num_channels=1,
                                           mime_type="audio/pcm")
                 started = True
             output_emitter.push(pcm)
