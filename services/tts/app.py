@@ -84,8 +84,12 @@ def _warm() -> None:
                 load(name)
             except Exception:  # noqa: BLE001 - keep serving other voices
                 log.exception("could not load voice %s", name)
-    if "neural" in ENGINES and os.getenv("NEURAL_PRELOAD", "true") == "true":
+    preload = os.getenv("NEURAL_PRELOAD", "true")
+    if "neural" in ENGINES and preload == "true":
         neural.engine()
+    elif "neural" in ENGINES and preload == "background":
+        # Start loading now without blocking startup, so the first natural-voice request doesn't wait for it.
+        threading.Thread(target=neural.engine, daemon=True, name="neural-preload").start()
 
 
 class SynthesisRequest(BaseModel):
@@ -98,7 +102,7 @@ class SynthesisRequest(BaseModel):
 
 @app.get("/health")
 def health() -> dict:
-    lazy = os.getenv("NEURAL_PRELOAD", "true") != "true"  # the natural voice model loads on first use
+    lazy = os.getenv("NEURAL_PRELOAD", "true") != "true"  # the natural voice model loads in the background / on use
     ready = (("piper" not in ENGINES) or bool(_voices)) and (("neural" not in ENGINES) or neural.loaded() or lazy)
     out = {"status": "ok" if ready else "loading", "engines": ENGINES, "voices": list(_voices)}
     if "neural" in ENGINES:

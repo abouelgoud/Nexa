@@ -83,10 +83,13 @@ esac
 [ "$SETUP_ONLY" = 1 ] && { step "Installed. Run scripts/voice-mac.sh --model $MODEL to start."; exit 0; }
 
 step "Starting the voice service on http://localhost:$PORT ($MODEL on $DEVICE)"
-info "Loading the model can take a few minutes the first time (it is downloaded once)."
+info "The model loads in the background (downloaded once: a few minutes the first time)."
 info "In Docker setups set NEURAL_TTS_BASE_URL=http://host.docker.internal:$PORT in .env. Ctrl+C stops."
 cd "$SERVICE_DIR"
 export TTS_ENGINES=neural NEURAL_MODEL="$MODEL" NEURAL_DEVICE="${NEURAL_DEVICE:-auto}"
 export NEURAL_VOICE_DIR="${NEURAL_VOICE_DIR:-$STATE_DIR/neural-voices}"
+# The model (~3-5 GB) starts loading in the background right away (NEURAL_PRELOAD=false: only when first used),
+# and its memory is freed after 10 idle minutes; it reloads on the next use.
+export NEURAL_PRELOAD="${NEURAL_PRELOAD:-background}" NEURAL_IDLE_MINUTES="${NEURAL_IDLE_MINUTES:-10}"
 export PYTORCH_ENABLE_MPS_FALLBACK=1  # run the few operations Metal lacks on the CPU instead of failing
 exec "$VENV/bin/uvicorn" app:app --host 0.0.0.0 --port "$PORT"

@@ -11,7 +11,7 @@
 # on the Apple GPU instead (same accuracy, several times faster):
 #   scripts/stt-mac.sh   and in .env:  STT_BASE_URL=http://host.docker.internal:8011/v1   (then: docker compose stop stt)
 # The LLM likewise: `ollama serve` + `ollama pull qwen2.5:3b`, and LLM_BASE_URL=http://host.docker.internal:11434/v1
-# Natural/cloned voices on a Mac: scripts/voice-mac.sh and NEURAL_TTS_BASE_URL=http://host.docker.internal:8004.
+# Natural/cloned voices run on the Mac itself (Apple GPU), not in Docker: scripts/start-mac.sh starts both.
 #
 # Copy .env.example to .env first (optional).
 
@@ -31,7 +31,9 @@ x-api-env: &api-env
   STT_BASE_URL: ${STT_BASE_URL:-http://stt:8001/v1}
   TTS_PROVIDER: ${TTS_PROVIDER:-piper}
   TTS_BASE_URL: ${TTS_BASE_URL:-http://tts:8002}
-  NEURAL_TTS_BASE_URL: ${NEURAL_TTS_BASE_URL:-http://tts-neural:8002}
+  # Natural/cloned voices run outside Docker on the Mac (scripts/voice-mac.sh, Apple GPU). With the NVIDIA `neural`
+  # profile instead: NEURAL_TTS_BASE_URL=http://tts-neural:8002
+  NEURAL_TTS_BASE_URL: ${NEURAL_TTS_BASE_URL:-http://host.docker.internal:8004}
   ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
   ELEVENLABS_TTS_MODEL: ${ELEVENLABS_TTS_MODEL:-eleven_multilingual_v2}
   ELEVENLABS_STT_MODEL: ${ELEVENLABS_STT_MODEL:-scribe_v2}

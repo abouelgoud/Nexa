@@ -15,7 +15,7 @@ from nexa.providers.tts.base import SynthesisResult, TTSError, TTSProvider
 class NeuralHTTPTTS(TTSProvider):
     name = "neural"
 
-    def __init__(self, base_url: str, timeout: float = 300.0, transport: httpx.AsyncBaseTransport | None = None,
+    def __init__(self, base_url: str, timeout: float = 600.0, transport: httpx.AsyncBaseTransport | None = None,
                  restore: Callable[[str], Awaitable[bytes | None]] | None = None):
         self.base_url = base_url.rstrip("/")
         self._client = httpx.AsyncClient(timeout=timeout, transport=transport)
@@ -46,7 +46,7 @@ class NeuralHTTPTTS(TTSProvider):
         try:
             # Cloning analyses the whole recording, which takes a while without a GPU.
             r = await self._client.post(f"{self.base_url}/voices/clone", data={"voice_id": voice_id},
-                                        files={"file": (filename, audio)}, timeout=300)
+                                        files={"file": (filename, audio)}, timeout=600)
         except httpx.HTTPError as exc:
             raise TTSError(f"Neural voice service unreachable: {exc}") from exc
         if r.status_code >= 400:

@@ -365,7 +365,7 @@ YAML
   # Natural voices (~3-5 GB) load only when a cloned/natural voice is used and are freed after 10 idle minutes.
   if [ "$WITH_NATURAL" = 1 ]; then
     start voices "$ROOT" env NEURAL_PORT="$NEURAL_PORT" NEURAL_VOICE_DIR="$MODELS_DIR/neural-voices" \
-      NEURAL_PRELOAD=false NEURAL_IDLE_MINUTES="${NEURAL_IDLE_MINUTES:-10}" \
+      NEURAL_PRELOAD=background NEURAL_IDLE_MINUTES="${NEURAL_IDLE_MINUTES:-10}" \
       "$ROOT/scripts/voice-mac.sh" --model "$VOICE_MODEL"
   fi
 fi
