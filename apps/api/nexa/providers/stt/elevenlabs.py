@@ -21,7 +21,9 @@ class ElevenLabsSTT(STTProvider):
         self._client = httpx.AsyncClient(timeout=timeout, headers={"xi-api-key": api_key}, transport=transport)
 
     async def transcribe(self, audio, *, mime_type="audio/wav", language=None, prompt=None,
-                         keywords=None) -> TranscriptionResult:
+                         keywords=None, languages=None) -> TranscriptionResult:
+        if not language and languages and len(languages) == 1:
+            language = languages[0]
         data: dict[str, str | list[str]] = {"model_id": self.model_id, "tag_audio_events": "false"}
         if language:
             data["language_code"] = language

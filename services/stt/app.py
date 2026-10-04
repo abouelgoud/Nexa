@@ -74,28 +74,50 @@ def load() -> None:
     model()
 
 
-def _faster_whisper(audio: bytes, language, prompt, hotwords) -> dict:
-    segments, info = model().transcribe(
-        io.BytesIO(audio), language=language or None, beam_size=BEAM, vad_filter=True,
-        initial_prompt=prompt, condition_on_previous_text=False,
-        # Words the caller is likely to say (doctor names, specialties) - improves accuracy on names.
-        hotwords=hotwords or None,
-        vad_parameters={"min_silence_duration_ms": 300},
-    )
+def best_allowed(probs, allowed: list[str]) -> str:
+    """The most likely language among the allowed ones (Whisper's own pick may be e.g. Persian for short Arabic)."""
+    scores = dict(probs or [])
+    return max(allowed, key=lambda lang: scores.get(lang, 0.0))
+
+
+def _faster_whisper(audio: bytes, language, prompt, hotwords, allowed=None) -> dict:
+    if not language and allowed and len(allowed) == 1:
+        language = allowed[0]
+
+    def run(lang):
+        return model().transcribe(
+            io.BytesIO(audio), language=lang or None, beam_size=BEAM, vad_filter=True,
+            initial_prompt=prompt, condition_on_previous_text=False,
+            # Words the caller is likely to say (doctor names, specialties) - improves accuracy on names.
+            hotwords=hotwords or None,
+            vad_parameters={"min_silence_duration_ms": 300},
+        )
+
+    segments, info = run(language)  # lazy: detection has run, transcription happens when iterated
+    if not language and allowed and info.language not in allowed:
+        segments, info = run(best_allowed(info.all_language_probs, allowed))
     segs = [{"start": round(s.start, 2), "end": round(s.end, 2), "text": s.text.strip(),
              "avg_logprob": round(s.avg_logprob, 3)} for s in segments]
     return {"segments": segs, "language": info.language,
             "language_probability": round(info.language_probability, 3), "duration": round(info.duration, 2)}
 
 
-def _mlx(audio: bytes, language, prompt, hotwords) -> dict:
+def _mlx(audio: bytes, language, prompt, hotwords, allowed=None) -> dict:
     import mlx_whisper
 
+    if not language and allowed and len(allowed) == 1:
+        language = allowed[0]
     samples = decode_audio(io.BytesIO(audio), sampling_rate=16000)
-    # mlx-whisper has no hotwords; putting them in the prompt recovers most of their benefit.
-    out = mlx_whisper.transcribe(samples, path_or_hf_repo=_mlx_repo, language=language or None,
-                                 initial_prompt=f"{prompt} {hotwords}" if hotwords else prompt,
-                                 condition_on_previous_text=False, verbose=None)
+
+    def run(lang):
+        # mlx-whisper has no hotwords; putting them in the prompt recovers most of their benefit.
+        return mlx_whisper.transcribe(samples, path_or_hf_repo=_mlx_repo, language=lang or None,
+                                      initial_prompt=f"{prompt} {hotwords}" if hotwords else prompt,
+                                      condition_on_previous_text=False, verbose=None)
+
+    out = run(language)
+    if not language and allowed and out.get("language") not in allowed:
+        out = run(allowed[0])  # mlx reports no per-language scores; use the agent's main language
     segs = [{"start": round(float(s["start"]), 2), "end": round(float(s["end"]), 2), "text": s["text"].strip(),
              "avg_logprob": round(float(s.get("avg_logprob", 0.0)), 3)}
             for s in out.get("segments", []) if s.get("no_speech_prob", 0) < 0.6]
@@ -118,14 +140,16 @@ def health() -> dict:
 @app.post("/v1/audio/transcriptions")
 def transcribe(file: UploadFile = File(...), model_name: str | None = Form(None, alias="model"),
                language: str | None = Form(None), prompt: str | None = Form(None),
-               hotwords: str | None = Form(None), response_format: str = Form("json")) -> dict:
+               hotwords: str | None = Form(None), languages: str | None = Form(None),
+               response_format: str = Form("json")) -> dict:
     # A plain (sync) endpoint: FastAPI runs it in a worker thread, so one transcription never blocks the others.
     global _mlx_repo
     audio = file.file.read()
     if not audio:
         raise HTTPException(400, "empty audio")
     start = time.perf_counter()
-    args = (audio, language, prompt or DEFAULT_PROMPT, hotwords)
+    allowed = [lang.strip() for lang in (languages or "").split(",") if lang.strip()] or None
+    args = (audio, language, prompt or DEFAULT_PROMPT, hotwords, allowed)
     try:
         if _mlx_repo:
             try:

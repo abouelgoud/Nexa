@@ -1,4 +1,4 @@
-# Nexa - everything in Docker, light by default (about 4-5 GB of memory in use, every service capped).
+# Nexa - everything in Docker, light by default (about 5 GB of memory in use, every service capped).
 #
 #   docker compose up -d --build                # web :3000, API :8000, LiveKit :7880, local LLM, speech, voices
 #   docker compose --profile worker up -d       # + background worker (only needed at scale; jobs run in the API)
@@ -7,9 +7,10 @@
 #   docker compose --profile sip up -d          # + LiveKit SIP for real phone numbers
 #   docker compose --profile monitoring up -d   # + Prometheus & Grafana
 #
-# On a Mac, Docker can't use the GPU, so models run on the CPU. For faster replies, run the LLM natively instead
-# (it then uses the Apple GPU): `ollama serve` + `ollama pull qwen2.5:3b`, and in .env:
-#   LLM_BASE_URL=http://host.docker.internal:11434/v1
+# On a Mac, Docker can't use the GPU, so models run on the CPU. Speech recognition is the slow part; run it natively
+# on the Apple GPU instead (same accuracy, several times faster):
+#   scripts/stt-mac.sh   and in .env:  STT_BASE_URL=http://host.docker.internal:8011/v1   (then: docker compose stop stt)
+# The LLM likewise: `ollama serve` + `ollama pull qwen2.5:3b`, and LLM_BASE_URL=http://host.docker.internal:11434/v1
 # Natural/cloned voices on a Mac: scripts/voice-mac.sh and NEURAL_TTS_BASE_URL=http://host.docker.internal:8004.
 #
 # Copy .env.example to .env first (optional).
@@ -117,14 +118,15 @@ services:
   stt:
     build: { context: services/stt }
     environment:
-      # small: 17.8% word errors on our Arabic call tests, ~1.3 GB. large-v3-turbo: 13.4%, ~2.1 GB (raise STT_MEMORY).
-      WHISPER_MODEL: ${WHISPER_MODEL:-small}
+      # large-v3-turbo: 13.4% word errors on our Arabic call tests and exact on a real recorded voice, ~2.1 GB.
+      # small saves ~1.4 GB but mishears Arabic noticeably more (17.8%): WHISPER_MODEL=small STT_MEMORY=2g.
+      WHISPER_MODEL: ${WHISPER_MODEL:-large-v3-turbo}
       WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
       WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
       WHISPER_BEAM_SIZE: ${WHISPER_BEAM_SIZE:-1}   # as accurate as beam search on call audio, and faster
     volumes: [models:/models]
     ports: ["8001:8001"]
-    mem_limit: ${STT_MEMORY:-2g}
+    mem_limit: ${STT_MEMORY:-3g}
     restart: unless-stopped
 
   tts:

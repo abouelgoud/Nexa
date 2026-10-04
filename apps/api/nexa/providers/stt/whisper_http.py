@@ -39,12 +39,14 @@ class WhisperHTTPSTT(STTProvider):
         self._client = httpx.AsyncClient(timeout=timeout, transport=transport)
 
     async def transcribe(self, audio, *, mime_type="audio/wav", language=None, prompt=None,
-                         keywords=None) -> TranscriptionResult:
+                         keywords=None, languages=None) -> TranscriptionResult:
         ext = {"audio/webm": "webm", "audio/ogg": "ogg", "audio/mpeg": "mp3", "audio/mp4": "m4a"}.get(
             mime_type.split(";")[0], "wav")
         data = {"model": self.model, "response_format": "verbose_json"}
         if language:
             data["language"] = language
+        elif languages:
+            data["languages"] = ",".join(languages)  # detect, but only among the agent's languages
         if prompt:
             data["prompt"] = prompt
         if keywords:

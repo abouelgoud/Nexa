@@ -22,7 +22,9 @@ class AzureSTT(STTProvider):
                                          headers={"Ocp-Apim-Subscription-Key": key})
 
     async def transcribe(self, audio, *, mime_type="audio/wav", language=None, prompt=None,
-                         keywords=None) -> TranscriptionResult:
+                         keywords=None, languages=None) -> TranscriptionResult:
+        if not language and languages and len(languages) == 1:
+            language = languages[0]
         if not is_wav(audio):
             raise STTError("Azure speech recognition needs WAV audio.")
         audio = to_wav_mono(audio, 16000)

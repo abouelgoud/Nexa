@@ -343,7 +343,8 @@ async def test_neural_voice_restored_from_saved_recording(account):
 
 async def test_audio_turn_passes_vocabulary_to_recognition(account):
     class FakeSTT(STTProvider):
-        async def transcribe(self, audio, *, mime_type="audio/wav", language=None, prompt=None, keywords=None):
+        async def transcribe(self, audio, *, mime_type="audio/wav", language=None, prompt=None, keywords=None,
+                         languages=None):
             self.keywords = keywords
             return TranscriptionResult(text="أبغى موعد", language="ar", duration_seconds=1.0)
 

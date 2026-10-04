@@ -44,7 +44,8 @@ class FakeSTT(STTProvider):
     def __init__(self):
         self.received = b""
 
-    async def transcribe(self, audio, *, mime_type="audio/wav", language=None, prompt=None, keywords=None):
+    async def transcribe(self, audio, *, mime_type="audio/wav", language=None, prompt=None, keywords=None,
+                         languages=None):
         self.received = audio
         self.keywords = keywords
         return TranscriptionResult(text="أبغى أحجز موعد", language="ar", duration_seconds=0.5)

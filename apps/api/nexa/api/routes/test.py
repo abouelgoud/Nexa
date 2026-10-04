@@ -107,7 +107,8 @@ async def send_audio(session_id: UUID, file: UploadFile = File(...), voice: bool
     try:
         tr = await stt.transcribe(audio, mime_type=file.content_type or "audio/webm",
                                   prompt="محادثة هاتفية لحجز موعد. Arabic and English phone conversation.",
-                                  keywords=stt_keywords(rt.definition))
+                                  keywords=stt_keywords(rt.definition),
+                                  languages=[getattr(lang, "value", lang) for lang in rt.definition.languages])
     except STTError as exc:
         raise ServiceUnavailable("Speech recognition is not available right now. Is the STT service running?",
                                  details=str(exc)) from exc

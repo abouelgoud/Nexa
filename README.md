@@ -17,8 +17,8 @@ docker compose up -d --build               # web :3000, API :8000 (OpenAPI at /d
 ```
 
 Everything runs in Docker: database, API, web app, local LLM (llama.cpp + Qwen2.5 3B), speech recognition
-(Whisper small), voices (Piper), LiveKit and the live-call worker. It is sized for an ordinary laptop: about
-4-5 GB of memory in use, with a memory cap on every service so it can't grow beyond that. The first start downloads
+(Whisper large-v3-turbo), voices (Piper), LiveKit and the live-call worker. It is sized for an ordinary laptop:
+about 5 GB of memory in use, with a memory cap on every service so it can't grow beyond that. The first start downloads
 the models (about 3 GB). See `docs/voice-quality.md` for speed, accuracy and memory options (e.g. a native LLM on a
 Mac's GPU, larger Whisper, cloud speech), and `docker compose --profile gpu up` for vLLM on an NVIDIA GPU.
 

@@ -125,7 +125,7 @@ async def entrypoint(ctx: JobContext) -> None:
 
     agent = NexaVoiceAgent(handle, tts_for_language=switch_voice)
     session = AgentSession(stt=NexaSTT(get_stt(), prompt="مكالمة هاتفية. Phone call in Arabic and English.",
-                                       keywords=stt_keywords(defn)),
+                                       keywords=stt_keywords(defn), languages=[getattr(lang, "value", lang) for lang in defn.languages]),
                            llm=RuntimeLLM(), tts=voice_tts, vad=ctx.proc.userdata["vad"], turn_handling=TURN_HANDLING)
 
     async def finish(reason: str = "caller_hangup") -> None:

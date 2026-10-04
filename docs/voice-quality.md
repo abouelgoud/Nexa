@@ -64,6 +64,9 @@ Each turn is: detect that the caller stopped talking → recognise the speech �
 Where the time goes is shown per turn on the call page ("recognized in", "answered in") and in
 `.dev/voice-runtime.log` (`timing:` lines).
 
+* **Language**: recognition only picks among the agent's languages (Agent → languages). If Whisper hears an
+  Arabic phrase as, say, Persian, it is re-done as the most likely of the agent's languages; an Arabic-only agent
+  is always recognised as Arabic.
 * **Recognition** is usually the slowest step without a GPU. On Apple Silicon the speech service runs Whisper on the
   GPU with `mlx-whisper` automatically (falling back to faster-whisper on the CPU if it can't). Calls use greedy
   decoding (`WHISPER_BEAM_SIZE=1`), which was as accurate as beam search on our Arabic call tests (13.4% vs 13.9% word
@@ -81,22 +84,23 @@ Where the time goes is shown per turn on the call page ("recognized in", "answer
 
 ## Docker (`docker compose up`, measured)
 
-Every service has a memory cap, so the stack can't grow beyond about 8.5 GB even under load. Measured after a live
-call:
+Every service has a memory cap, so the stack can't grow beyond about 9.5 GB even under load. Measured after a live
+call (speech recognition measured with Whisper small, then switched to large-v3-turbo for accuracy):
 
 | Service | In use | Cap |
 |---|---|---|
 | `llm` (llama.cpp, Qwen2.5 3B) | 1.8 GB | 3 GB (`LLM_MEMORY`) |
-| `stt` (Whisper small) | 0.7 GB | 2 GB (`STT_MEMORY`) |
+| `stt` (Whisper large-v3-turbo; `small`: 0.7 GB, less accurate) | ~2.1 GB | 3 GB (`STT_MEMORY`) |
 | `tts` (Piper) | 0.4 GB | 768 MB |
 | `voice-runtime` (calls as threads) | 0.4 GB | 1 GB |
 | `api`, `web`, `postgres`, `livekit`, `redis` | 0.3 GB together | |
-| **Total** | **~3.6 GB** | |
+| **Total** | **~5 GB** | |
 
 Per turn (live call, same test machine): recognition 5-8 s for ~5 s of speech, reply decided in 0.2 s, voice
 starting 0.3-0.8 s later. On a CPU, recognition is the slow step: it uses every core (`WHISPER_CPU_THREADS`), and
 the options to make it faster are a cloud recogniser (ElevenLabs Scribe / Azure, see above) or, on a Mac, running
-`scripts/dev-mac.sh`, which uses the Apple GPU. Docker on a Mac can't use the GPU. Likewise for the LLM: a native
+just the recogniser natively on the Apple GPU next to Docker: `scripts/stt-mac.sh` and
+`STT_BASE_URL=http://host.docker.internal:8011/v1` in `.env`. Docker on a Mac can't use the GPU. Likewise for the LLM: a native
 Ollama on the Mac (`LLM_BASE_URL=http://host.docker.internal:11434/v1`) is faster than the container.
 
 ## Memory (scripts/dev-mac.sh, measured)
