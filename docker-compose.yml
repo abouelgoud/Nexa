@@ -29,6 +29,7 @@ x-api-env: &api-env
   LLM_API_KEY: ${LLM_API_KEY:-not-needed}
   STT_PROVIDER: ${STT_PROVIDER:-whisper}
   STT_BASE_URL: ${STT_BASE_URL:-http://stt:8001/v1}
+  STT_TIMEOUT_SECONDS: ${STT_TIMEOUT_SECONDS:-180}
   TTS_PROVIDER: ${TTS_PROVIDER:-piper}
   TTS_BASE_URL: ${TTS_BASE_URL:-http://tts:8002}
   # Natural/cloned voices run outside Docker on the Mac (scripts/voice-mac.sh, Apple GPU). With the NVIDIA `neural`
