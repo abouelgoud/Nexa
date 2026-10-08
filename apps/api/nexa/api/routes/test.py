@@ -14,6 +14,7 @@ from nexa.core.errors import NotFound, ServiceUnavailable, ValidationFailed
 from nexa.core.observability import STT_LATENCY, TTS_LATENCY
 from nexa.core.rate_limit import limiter
 from nexa.models import AgentVersion
+from nexa.nlp.pronounce import parse_pronunciations, speakable
 from nexa.providers.registry import get_llm, get_stt, get_tts
 from nexa.providers.stt.base import STTError
 from nexa.providers.tts.base import TTSError
@@ -36,12 +37,14 @@ async def _speak(ctx: TenantContext, rt: ConversationRuntime, result: TurnResult
             return [{"error": f"The '{provider}' voice is not configured on this server."}]
         return []
     clips = []
+    custom = parse_pronunciations(defn.voice.pronunciations)
     for text in result.replies:
+        spoken = speakable(text, custom)
         try:
             if provider == "neural":  # same phrases as live calls, so pre-rendered lines come from the cache
-                r = await synthesize_phrased(tts, text, voice_id=voice, language=rt.lang, speed=defn.voice.speed)
+                r = await synthesize_phrased(tts, spoken, voice_id=voice, language=rt.lang, speed=defn.voice.speed)
             else:
-                r = await tts.synthesize(text, voice_id=voice, language=rt.lang, speed=defn.voice.speed)
+                r = await tts.synthesize(spoken, voice_id=voice, language=rt.lang, speed=defn.voice.speed)
         except TTSError as exc:
             return [{"error": str(exc)}]
         TTS_LATENCY.observe(r.latency_ms / 1000)

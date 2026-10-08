@@ -27,9 +27,10 @@ def test_fixed_phrases_skip_lines_with_variables():
         {"config": {"text": "تم حجز موعدك.", "text_en": "Your appointment is booked."}},
     ]}
     ar = fixed_phrases(defn, graph, "ar")
-    assert "أهلاً بك في عيادة الشفاء." in ar and "كيف أقدر أساعدك؟" in ar and "لحظة من فضلك." in ar
-    assert "هل تفضل طبيب معين؟" in ar and "تم حجز موعدك." in ar
-    assert not any("{{" in p or "عندي" in p for p in ar)
+    # As spoken: everyday words carry their spoken vowels ("أقدر" is aqdar), exactly what calls will request.
+    assert "أهلاً بك في عِيَادَة الشفاء." in ar and "كيف أَقْدَر أَسَاعِدَك؟" in ar and "لَحْظَة من فَضْلَك." in ar
+    assert "هل تفضل طَبِيب مُعَيَّن؟" in ar and "تَمّ حَجْز مَوْعِدَك." in ar
+    assert not any("{{" in p or "عِنْدِي" in p for p in ar)
     en = fixed_phrases(defn, graph, "en")
     assert "Do you prefer a specific doctor?" in en and "Your appointment is booked." in en
     assert not any("طبيب" in p for p in en)
@@ -62,5 +63,5 @@ async def test_saving_an_agent_with_a_natural_voice_pre_renders_its_fixed_lines(
     count = await warm_agent_voice(UUID(account.tenant_id), UUID(agent["id"]))
     assert count > 0
     texts = {t for _, _, t in neural.phrases}
-    assert "لحظة من فضلك." in texts and all(v == "noura" for _, v, _ in neural.phrases)
+    assert "لَحْظَة من فَضْلَك." in texts and all(v == "noura" for _, v, _ in neural.phrases)
     assert all(len(t.split()) <= 8 for t in texts)  # same phrases live calls request

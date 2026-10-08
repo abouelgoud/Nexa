@@ -89,6 +89,8 @@ class VoiceConfig(Strict):
     gender: Literal["female", "male"] = "male"
     # Short spoken acknowledgement ("لحظة من فضلك") when an answer takes a moment, like a person would.
     thinking_fillers: bool = True
+    # How to say the business's own names and terms: "word = how to say it" (e.g. "Nexa = نِكْسَا", "د. = دكتور").
+    pronunciations: list[str] = Field(default_factory=list, max_length=200)
 
 
 class Personality(Strict):

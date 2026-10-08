@@ -1,7 +1,7 @@
 """Text-to-speech service.
 
 Engines:
-* piper  - fast, CPU friendly, clear but synthetic voices. Arabic text is diacritized (tashkeel) first.
+* piper  - fast, CPU friendly, clear but synthetic voices. Arabic text is vowelled as it is spoken (spoken_ar.py).
 * neural - natural, human-like speech and zero-shot voice cloning from a consented recording, with
            Chatterbox Multilingual (MIT, default) or OmniVoice (NEURAL_MODEL=omnivoice; weights are
            non-commercial). Runs on an NVIDIA GPU, Apple Silicon (MPS) or CPU; see neural.py.
@@ -26,6 +26,7 @@ from collections import OrderedDict
 from pathlib import Path
 
 import neural
+import spoken_ar
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
@@ -72,7 +73,7 @@ def load(name: str) -> PiperVoice:
         if name not in _voices:
             voice = PiperVoice.load(str(ensure_voice(name)))
             if name.startswith("ar"):
-                voice.use_tashkeel = True
+                voice.use_tashkeel = False  # vowelled by spoken_ar before synthesis
             _voices[name] = voice
         return _voices[name]
 
@@ -229,7 +230,8 @@ def synthesize(req: SynthesisRequest) -> Response:
     start = time.perf_counter()
     buf = io.BytesIO()
     with wave.open(buf, "wb") as wav:
-        voice.synthesize_wav(req.text, wav, syn_config=SynthesisConfig(length_scale=1.0 / req.speed))
+        text = spoken_ar.spoken(req.text) if name.startswith("ar") else req.text
+        voice.synthesize_wav(text, wav, syn_config=SynthesisConfig(length_scale=1.0 / req.speed))
     return Response(buf.getvalue(), media_type="audio/wav", headers={
         "x-sample-rate": str(voice.config.sample_rate), "x-voice": name,
         "x-synthesis-ms": str(round((time.perf_counter() - start) * 1000, 1))})

@@ -410,6 +410,14 @@
           "default": true,
           "title": "Thinking Fillers",
           "type": "boolean"
+        },
+        "pronunciations": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 200,
+          "title": "Pronunciations",
+          "type": "array"
         }
       },
       "title": "VoiceConfig",

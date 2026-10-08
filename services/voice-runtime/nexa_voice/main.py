@@ -19,6 +19,7 @@ from livekit.plugins import silero
 from nexa.core.config import get_settings
 from nexa.core.db import get_sessionmaker
 from nexa.models import AgentVersion
+from nexa.nlp.pronounce import parse_pronunciations, speakable
 from nexa.providers.registry import get_sip, get_stt, get_tts
 from nexa.runtime.session import ConversationRuntime
 from nexa.schemas.agent_definition import AgentDefinition
@@ -145,7 +146,8 @@ async def entrypoint(ctx: JobContext) -> None:
     tts_provider = get_tts(provider) or get_tts()
     # The session plays at one rate: the engine's own (natural voices 24 kHz, Piper 22.05 kHz).
     voice_tts = NexaTTS(tts_provider, voice_id, handle.language, defn.voice.speed,
-                        sample_rate=24000 if getattr(tts_provider, "name", "") == "neural" else 22050)
+                        sample_rate=24000 if getattr(tts_provider, "name", "") == "neural" else 22050,
+                        pronunciations=parse_pronunciations(defn.voice.pronunciations))
 
     def switch_voice(language: str, dialect: str | None) -> None:
         voice_tts.language = language
@@ -198,7 +200,7 @@ async def entrypoint(ctx: JobContext) -> None:
     async def warm_filler(language: str, voice_id: str) -> None:
         """Render "one moment" for this voice ahead of time; the voice service caches it, so it plays instantly."""
         try:
-            await tts_provider.synthesize(FILLERS.get(language, FILLERS["ar"]), voice_id=voice_id, language=language,
+            await tts_provider.synthesize(speakable(FILLERS.get(language, FILLERS["ar"])), voice_id=voice_id, language=language,
                                           speed=defn.voice.speed)
         except Exception:  # noqa: BLE001 - only an optimisation
             log.debug("could not pre-render the filler phrase", exc_info=True)

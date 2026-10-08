@@ -12,7 +12,7 @@ COPY requirements.txt requirements-neural.txt requirements-omnivoice.txt ./
 RUN pip install --no-cache-dir -r requirements.txt && \
     if [ "$NEURAL" = "true" ]; then pip install --no-cache-dir -r requirements-neural.txt; fi && \
     if [ "$NEURAL" = "omnivoice" ]; then pip install --no-cache-dir -r requirements-omnivoice.txt; fi
-COPY app.py neural.py ./
+COPY app.py neural.py spoken_ar.py ./
 ENV PIPER_VOICE_DIR=/models/piper NEURAL_VOICE_DIR=/models/neural-voices HF_HOME=/models/hf
 EXPOSE 8002
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8002"]

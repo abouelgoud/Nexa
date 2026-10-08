@@ -17,6 +17,7 @@ from sqlalchemy import select
 
 from nexa.core.db import get_sessionmaker
 from nexa.models import Agent
+from nexa.nlp.pronounce import parse_pronunciations, speakable
 from nexa.providers.registry import get_tts
 from nexa.schemas.agent_definition import AgentDefinition, render_greeting
 from nexa.services.voices import resolve_voice
@@ -61,8 +62,9 @@ def speech_chunks(text: str, max_words: int = MAX_WORDS) -> list[str]:
 
 
 def fixed_phrases(defn: AgentDefinition, graph: dict | None, language: str) -> list[str]:
-    """The agent's lines that never change (no {{variables}}), split exactly as calls will request them."""
+    """The agent's lines that never change (no {{variables}}), as spoken and split exactly as calls request them."""
     texts = [render_greeting(defn, language), FILLERS.get(language, FILLERS["ar"])]
+    custom = parse_pronunciations(defn.voice.pronunciations)
     suffix = "_en" if language == "en" else ""
     for node in (graph or {}).get("nodes", []):
         cfg = node.get("config") or {}
@@ -72,7 +74,7 @@ def fixed_phrases(defn: AgentDefinition, graph: dict | None, language: str) -> l
                 texts.append(value)
     seen: dict[str, None] = {}
     for text in texts:
-        for chunk in speech_chunks(text):
+        for chunk in speech_chunks(speakable(text, custom)):
             seen.setdefault(chunk)
     return list(seen)
 

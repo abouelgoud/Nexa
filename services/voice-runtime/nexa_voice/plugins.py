@@ -13,6 +13,7 @@ from livekit.agents import APIConnectionError, llm, stt, tts, utils
 from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, NOT_GIVEN, APIConnectOptions, NotGivenOr
 
 from nexa.core.observability import STT_LATENCY, TTS_LATENCY
+from nexa.nlp.pronounce import speakable
 from nexa.providers.audio import wav_pcm
 from nexa.providers.stt.base import STTError, STTProvider
 from nexa.providers.tts.base import TTSError, TTSProvider
@@ -79,7 +80,7 @@ class NexaSTT(stt.STT):
 
 class NexaTTS(tts.TTS):
     def __init__(self, provider: TTSProvider, voice_id: str, language: str = "ar", speed: float = 1.0,
-                 sample_rate: int = 22050):
+                 sample_rate: int = 22050, pronunciations: dict[str, str] | None = None):
         super().__init__(capabilities=tts.TTSCapabilities(streaming=False), sample_rate=sample_rate, num_channels=1)
         self._provider = provider
         # Slow, high-quality voices are streamed phrase by phrase (see _run_phrases).
@@ -87,6 +88,7 @@ class NexaTTS(tts.TTS):
         self.voice_id = voice_id
         self.language = language
         self.speed = speed
+        self.pronunciations = pronunciations or {}
 
     def synthesize(self, text: str, *, conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS) -> tts.ChunkedStream:
         return _NexaChunkedStream(tts=self, input_text=text, conn_options=conn_options)
@@ -96,6 +98,8 @@ class _NexaChunkedStream(tts.ChunkedStream):
     def __init__(self, *, tts: NexaTTS, input_text: str, conn_options: APIConnectOptions):
         super().__init__(tts=tts, input_text=input_text, conn_options=conn_options)
         self._nexa_tts = tts
+        # Said the way people speak (the transcript keeps the written text).
+        self._spoken = speakable(input_text, tts.pronunciations)
 
     async def _run(self, output_emitter: tts.AudioEmitter) -> None:
         t = self._nexa_tts
@@ -104,7 +108,7 @@ class _NexaChunkedStream(tts.ChunkedStream):
             return
         start = time.perf_counter()
         try:
-            result = await t._provider.synthesize(self.input_text, voice_id=t.voice_id, language=t.language, speed=t.speed)
+            result = await t._provider.synthesize(self._spoken, voice_id=t.voice_id, language=t.language, speed=t.speed)
         except TTSError as exc:
             raise APIConnectionError(str(exc)) from exc
         TTS_LATENCY.observe(time.perf_counter() - start)
@@ -118,7 +122,7 @@ class _NexaChunkedStream(tts.ChunkedStream):
         caller hears the first words after one short phrase instead of after the whole sentence."""
         t = self._nexa_tts
         started = False
-        for phrase in speech_chunks(self.input_text):
+        for phrase in speech_chunks(self._spoken):
             start = time.perf_counter()
             try:
                 result = await t._provider.synthesize(phrase, voice_id=t.voice_id, language=t.language, speed=t.speed)

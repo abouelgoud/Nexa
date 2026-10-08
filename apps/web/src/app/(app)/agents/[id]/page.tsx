@@ -152,9 +152,7 @@ function LanguageSection({ form }: { form: Form }) {
       </div>
       <Controller control={control} name="language_behavior.vocabulary" render={({ field }) => (
         <Field label="Words callers will say" hint="Names, specialties, products, neighbourhoods - one per line. Greatly improves recognition of names.">
-          <Textarea dir="auto" rows={3} placeholder={"د. سارة العتيبي\nالجلدية\nDermatology"}
-            value={(field.value ?? []).join("\n")}
-            onChange={(e) => field.onChange(e.target.value.split("\n").map((w) => w.trim()).filter(Boolean))} />
+          <LinesInput value={field.value ?? []} onChange={field.onChange} rows={3} placeholder={"د. سارة العتيبي\nالجلدية\nDermatology"} />
         </Field>
       )} />
       <SwitchField control={control} name="language_behavior.code_switching" label="Understand Arabic-English mixing"
@@ -176,6 +174,17 @@ type VoiceProvider = { key: string; label: string; kind: string; cloning: boolea
 
 function playBase64(clip: { mime_type: string; audio_base64: string }) {
   void new Audio(`data:${clip.mime_type};base64,${clip.audio_base64}`).play();
+}
+
+/** One entry per line. Keeps the typed text (blank lines included) while editing; stores the non-empty lines. */
+function LinesInput({ value, onChange, rows, placeholder }: { value: string[]; onChange: (lines: string[]) => void; rows: number; placeholder: string }) {
+  const [text, setText] = useState(value.join("\n"));
+  const clean = (t: string) => t.split("\n").map((w) => w.trim()).filter(Boolean);
+  useEffect(() => {
+    if (clean(text).join("\n") !== value.join("\n")) setText(value.join("\n"));
+  }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
+  return <Textarea dir="auto" rows={rows} placeholder={placeholder} value={text}
+    onChange={(e) => { setText(e.target.value); onChange(clean(e.target.value)); }} />;
 }
 
 function VoiceSection({ form }: { form: Form }) {
@@ -250,6 +259,12 @@ function VoiceSection({ form }: { form: Form }) {
           </Field>
         </div>
       )}
+      <Controller control={control} name="voice.pronunciations" render={({ field }) => (
+        <Field label="Pronunciation" hint={'How to say your own names and terms, one per line: "word = how to say it". Add vowels to fix an Arabic word, e.g. "أقدر = أَقْدَر". Everyday spoken words are already handled.'}>
+          <LinesInput value={field.value ?? []} onChange={field.onChange} rows={3}
+            placeholder={"Nexa = نِكْسَا\nد. = دكتورة\nالعتيبي = العُتَيْبِي"} />
+        </Field>
+      )} />
       <SwitchField control={control} name="voice.thinking_fillers" label="Natural pauses"
         hint={'Says "لحظة من فضلك" / "One moment" when checking information takes a moment, instead of going silent.'} />
       <div className="flex flex-wrap items-center gap-2">

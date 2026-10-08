@@ -57,6 +57,7 @@ export const voiceSchema = z.strictObject({
   match_caller_dialect: z.boolean().default(false),
   gender: z.enum(["female", "male"]).default("male"),
   thinking_fillers: z.boolean().default(true),
+  pronunciations: z.array(z.string()).max(200).default([]),
 });
 
 export const personalitySchema = z.strictObject({

@@ -16,6 +16,7 @@ from sqlalchemy.orm import undefer
 from nexa.core.deps import TenantContext, get_tenant_context, require
 from nexa.core.errors import ServiceUnavailable, ValidationFailed
 from nexa.models import Voice
+from nexa.nlp.pronounce import speakable
 from nexa.providers.registry import TTS_PROVIDERS, get_tts, tts_configured
 from nexa.providers.tts.base import TTSError
 from nexa.services.audit import audit
@@ -164,7 +165,7 @@ async def preview(body: PreviewIn, ctx: TenantContext = Depends(require("test"))
         raise ServiceUnavailable(f"The {PROVIDERS.get(body.provider, {}).get('label', body.provider)} voice is not "
                                  "configured on this server. Add its API key or start its service.")
     try:
-        r = await tts.synthesize(body.text or SAMPLE_TEXT[body.language], voice_id=body.voice_id,
+        r = await tts.synthesize(speakable(body.text or SAMPLE_TEXT[body.language]), voice_id=body.voice_id,
                                  language=body.language, speed=body.speed)
     except TTSError as exc:
         raise ServiceUnavailable("The voice could not be generated right now.", details=str(exc)) from exc
