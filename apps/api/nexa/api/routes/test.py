@@ -25,6 +25,17 @@ from nexa.services.speech_cache import synthesize_phrased
 from nexa.services.usage import record_usage
 from nexa.services.voices import resolve_voice, stt_keywords
 
+# What to tell the user, by what went wrong (the technical detail goes in ``details``).
+STT_ADVICE = {
+    "unreachable": "The speech recognition service isn't reachable. Check it is running: `docker compose ps stt` "
+                   "(logs: `docker compose logs stt`), or scripts/stt-mac.sh if STT_BASE_URL points at the Mac.",
+    "loading": "Speech recognition is still loading its model (the first start downloads about 1.6 GB). "
+               "Try again in a minute.",
+    "timeout": "Speech recognition took too long on this computer. On a Mac, run scripts/stt-mac.sh to use the "
+               "Apple GPU, or keep messages short.",
+    "failed": "Speech recognition could not process this recording. Try again, or check `docker compose logs stt`.",
+}
+
 router = APIRouter(prefix="/test", tags=["test"], dependencies=[Depends(limiter("test", 240))])
 
 
@@ -117,7 +128,7 @@ async def send_audio(session_id: UUID, file: UploadFile = File(...), voice: bool
                                   keywords=stt_keywords(rt.definition),
                                   languages=[getattr(lang, "value", lang) for lang in rt.definition.languages])
     except STTError as exc:
-        raise ServiceUnavailable("Speech recognition is not available right now. Is the STT service running?",
+        raise ServiceUnavailable(STT_ADVICE.get(getattr(exc, "reason", "failed"), STT_ADVICE["failed"]),
                                  details=str(exc)) from exc
     stt_ms = (time.perf_counter() - t0) * 1000
     STT_LATENCY.observe(stt_ms / 1000)

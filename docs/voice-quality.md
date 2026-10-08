@@ -139,3 +139,19 @@ mixing), CPU int8, synthetic test speech - indicative only; measure on recording
 
 Recommendation: Whisper **large-v3 on a GPU with the agent's vocabulary filled in**, or ElevenLabs Scribe if you
 prefer a cloud service. Whisper small is only meant for trying the platform on a laptop.
+
+## Noise in a cloned voice
+
+A cloned voice copies its reference recording, background included. The voice service cleans every recording
+before use (services/tts/cleanup.py): band-limited resampling to 24 kHz, hum removal below 70 Hz, noise
+reduction learned from the pauses, and trimmed silence. Recordings saved before this was added are cleaned once
+when the service starts, and their cached phrases are rendered again. On a noisy recording reproduced in tests,
+the hiss between words dropped from about -37 dB to -60 dB, the same as the built-in voice. For the best result
+still record 10-30 s of clear speech in a quiet room.
+
+## "Speech recognition is not available"
+
+The test page now says which case it is: the service isn't reachable (`docker compose ps stt`, or
+`scripts/stt-mac.sh` when `STT_BASE_URL` points at the Mac), it is still loading its model (the first start
+downloads ~1.6 GB; `/health` reports `loading`), or recognition took too long (`STT_TIMEOUT_SECONDS`, default
+180; on a Mac use `scripts/stt-mac.sh`). The technical reason is shown under the message.

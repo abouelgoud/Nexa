@@ -1,2 +1,3 @@
 chatterbox-tts>=0.1.4
 soundfile>=0.12
+scipy>=1.10  # reference cleanup (cleanup.py)

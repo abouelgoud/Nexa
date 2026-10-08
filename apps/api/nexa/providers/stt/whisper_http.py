@@ -36,6 +36,7 @@ class WhisperHTTPSTT(STTProvider):
                  transport: httpx.AsyncBaseTransport | None = None):
         self.base_url = base_url.rstrip("/")
         self.model = model
+        self.timeout = timeout
         self._client = httpx.AsyncClient(timeout=timeout, transport=transport)
 
     async def transcribe(self, audio, *, mime_type="audio/wav", language=None, prompt=None,
@@ -56,10 +57,13 @@ class WhisperHTTPSTT(STTProvider):
         try:
             r = await self._client.post(f"{self.base_url}/audio/transcriptions", data=data,
                                         files={"file": (f"audio.{ext}", audio, mime_type)})
+        except httpx.TimeoutException as exc:
+            raise STTError(f"Speech recognition timed out after {self.timeout:.0f} s", "timeout") from exc
         except httpx.HTTPError as exc:
-            raise STTError(f"Speech recognition service unreachable: {exc}") from exc
+            raise STTError(f"Speech recognition service unreachable at {self.base_url}: {exc}", "unreachable") from exc
         if r.status_code >= 400:
-            raise STTError(f"Speech recognition failed ({r.status_code}): {r.text[:200]}")
+            reason = "loading" if r.status_code == 503 else "failed"
+            raise STTError(f"Speech recognition failed ({r.status_code}): {r.text[:200]}", reason)
         body = r.json()
         text = (body.get("text") or "").strip()
         if echoes_hint(text, prompt or SERVICE_DEFAULT_PROMPT, data.get("hotwords")):

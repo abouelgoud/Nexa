@@ -24,7 +24,11 @@ class TranscriptionResult:
 
 
 class STTError(RuntimeError):
-    pass
+    """``reason``: unreachable | timeout | loading | failed - lets the app tell the user what to do."""
+
+    def __init__(self, message: str, reason: str = "failed"):
+        super().__init__(message)
+        self.reason = reason
 
 
 class STTProvider(ABC):

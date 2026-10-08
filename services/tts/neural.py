@@ -200,7 +200,7 @@ def _to_wav(samples, rate: int) -> bytes:
 
 def save_reference(voice_id: str, data: bytes) -> dict:
     """Store a cleaned-up reference clip (mono, 24 kHz, max 30 s) and prepare it for the model."""
-    import numpy as np
+    import cleanup
     import soundfile as sf
 
     try:
@@ -208,19 +208,18 @@ def save_reference(voice_id: str, data: bytes) -> dict:
     except Exception as exc:  # noqa: BLE001 - libsndfile raises various errors
         raise ValueError("Unsupported audio. Upload WAV, FLAC, OGG or MP3.") from exc
     audio = audio.mean(axis=1)
-    if rate != 24000:
-        n = int(len(audio) * 24000 / rate)
-        audio = np.interp(np.linspace(0, len(audio) - 1, n), np.arange(len(audio)), audio)
-        rate = 24000
-    seconds = len(audio) / rate
-    if seconds < 4:
+    if len(audio) / rate < 4:
         raise ValueError("The recording is too short (minimum 4 seconds; 10 to 30 seconds gives the closest match).")
-    audio = audio[: MAX_REFERENCE_SECONDS * rate]
-    peak = float(np.max(np.abs(audio))) or 1.0
-    audio = audio / peak * 0.9
+    audio = cleanup.clean_reference(audio[: (MAX_REFERENCE_SECONDS + 5) * rate], rate)[: MAX_REFERENCE_SECONDS * 24000]
+    rate = cleanup.RATE
+    seconds = len(audio) / rate
+    if seconds < 3:
+        raise ValueError("The recording has too little speech (it is mostly silence). Record 10 to 30 seconds of "
+                         "clear speech in a quiet room.")
     VOICE_DIR.mkdir(parents=True, exist_ok=True)
     (VOICE_DIR / f"{voice_id}.pt").unlink(missing_ok=True)
     (VOICE_DIR / f"{voice_id}.wav").write_bytes(_to_wav(audio, rate))
+    (VOICE_DIR / f"{voice_id}.clean").write_text(cleanup.VERSION)
     model = engine()
     if hasattr(model, "forget"):
         model.forget(voice_id)
@@ -232,14 +231,39 @@ def save_reference(voice_id: str, data: bytes) -> dict:
     return result
 
 
+def clean_stored_references() -> list[str]:
+    """Clean references stored before the current cleaning (once each). Returns the voices that changed, whose
+    cached phrases must be rendered again."""
+    import cleanup
+    import soundfile as sf
+
+    changed = []
+    for path in sorted(VOICE_DIR.glob("*.wav")) if VOICE_DIR.exists() else []:
+        marker = path.with_suffix(".clean")
+        if marker.exists() and marker.read_text().strip() == cleanup.VERSION:
+            continue
+        try:
+            audio, rate = sf.read(path, dtype="float32", always_2d=True)
+            path.write_bytes(_to_wav(cleanup.clean_reference(audio.mean(axis=1), rate), cleanup.RATE))
+            path.with_suffix(".pt").unlink(missing_ok=True)
+            marker.write_text(cleanup.VERSION)
+            changed.append(path.stem)
+        except Exception:  # noqa: BLE001 - keep the original; it still works
+            log.warning("could not clean voice %s", path.stem, exc_info=True)
+    if changed:
+        log.warning("cleaned %d stored voice recording(s): %s", len(changed), ", ".join(changed))
+    return changed
+
+
 def delete_reference(voice_id: str) -> None:
-    for suffix in (".wav", ".pt"):
+    for suffix in (".wav", ".pt", ".clean"):
         (VOICE_DIR / f"{voice_id}{suffix}").unlink(missing_ok=True)
     if _model is not None and hasattr(_model, "forget"):
         _model.forget(voice_id)
 
 
 def synthesize(text: str, voice_id: str, language: str) -> tuple[bytes, int]:
+    import cleanup
     import numpy as np
 
     model = engine()
@@ -252,6 +276,6 @@ def synthesize(text: str, voice_id: str, language: str) -> tuple[bytes, int]:
     chunks = []
     with _lock:
         for part in parts:
-            chunks.append(np.asarray(model.generate(part, language, reference), dtype="float32"))
+            chunks.append(cleanup.polish(model.generate(part, language, reference), model.sr))
             chunks.append(np.zeros(int(model.sr * 0.12), dtype="float32"))  # natural pause between sentences
     return _to_wav(np.concatenate(chunks), model.sr), model.sr

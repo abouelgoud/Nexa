@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     stt_provider: Literal["whisper", "openai_compatible", "elevenlabs", "azure", "none"] = "whisper"
     stt_base_url: str = "http://stt:8001/v1"
     stt_model: str = "large-v3"
+    # Recognition of a long push-to-talk clip on a slow CPU can take a while; calls send short turns.
+    stt_timeout_seconds: float = 180.0
 
     tts_provider: Literal["piper", "none"] = "piper"
     tts_base_url: str = "http://tts:8002"

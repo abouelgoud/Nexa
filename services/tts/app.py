@@ -86,6 +86,9 @@ def _warm() -> None:
                 load(name)
             except Exception:  # noqa: BLE001 - keep serving other voices
                 log.exception("could not load voice %s", name)
+    if "neural" in ENGINES:
+        for voice_id in neural.clean_stored_references():
+            _forget_voice(voice_id)  # its cached phrases were rendered from the noisy recording
     preload = os.getenv("NEURAL_PRELOAD", "true")
     if "neural" in ENGINES and preload == "true":
         neural.engine()

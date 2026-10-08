@@ -14,6 +14,7 @@ import logging
 import os
 import platform
 import sys
+import threading
 import time
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -37,6 +38,9 @@ log = logging.getLogger("stt")
 app = FastAPI(title="Nexa STT (Whisper)")
 _model: WhisperModel | None = None
 _mlx_repo: str | None = None  # set when the mlx engine is active
+_ready = threading.Event()  # the model is loaded (it loads in the background; the first start downloads it)
+_load_error: str | None = None
+_load_lock = threading.Lock()
 
 
 def _use_mlx() -> bool:
@@ -46,6 +50,12 @@ def _use_mlx() -> bool:
 
 
 def model() -> WhisperModel:
+    global _model
+    with _load_lock:
+        return _model or _load_faster_whisper()
+
+
+def _load_faster_whisper() -> WhisperModel:
     global _model
     if _model is None:
         start = time.perf_counter()
@@ -125,16 +135,32 @@ def _mlx(audio: bytes, language, prompt, hotwords, allowed=None) -> dict:
             "duration": round(len(samples) / 16000, 2)}
 
 
+def _load_in_background() -> None:
+    global _load_error
+    try:
+        load()
+    except Exception as exc:  # noqa: BLE001 - reported by /health and to callers
+        _load_error = f"{type(exc).__name__}: {exc}"
+        log.exception("could not load the speech recognition model")
+    finally:
+        _ready.set()
+
+
 @app.on_event("startup")
 def _warm() -> None:
+    # Load without blocking startup, so the service answers right away (with "loading") instead of refusing
+    # connections while the model downloads on first start.
     if os.getenv("WHISPER_PRELOAD", "true") == "true":
-        load()
+        threading.Thread(target=_load_in_background, daemon=True, name="whisper-load").start()
+    else:
+        _ready.set()
 
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok" if (_model is not None or _mlx_repo) else "loading", "model": MODEL,
-            "engine": "mlx" if _mlx_repo else "faster-whisper"}
+    status = "error" if _load_error else "ok" if _ready.is_set() else "loading"
+    return {"status": status, "model": MODEL, "engine": "mlx" if _mlx_repo else "faster-whisper",
+            **({"error": _load_error} if _load_error else {})}
 
 
 @app.post("/v1/audio/transcriptions")
@@ -144,6 +170,10 @@ def transcribe(file: UploadFile = File(...), model_name: str | None = Form(None,
                response_format: str = Form("json")) -> dict:
     # A plain (sync) endpoint: FastAPI runs it in a worker thread, so one transcription never blocks the others.
     global _mlx_repo
+    if not _ready.wait(timeout=20):
+        raise HTTPException(503, f"loading: the {MODEL} model is still loading (the first start downloads it)")
+    if _load_error and not _mlx_repo and _model is None:
+        raise HTTPException(503, f"model failed to load: {_load_error}")
     audio = file.file.read()
     if not audio:
         raise HTTPException(400, "empty audio")

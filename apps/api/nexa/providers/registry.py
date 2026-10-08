@@ -65,7 +65,7 @@ def _build_stt() -> STTProvider | None:
         return AzureSTT(s.azure_speech_key, s.azure_speech_region)
     from nexa.providers.stt.whisper_http import WhisperHTTPSTT
 
-    return WhisperHTTPSTT(s.stt_base_url, s.stt_model)
+    return WhisperHTTPSTT(s.stt_base_url, s.stt_model, timeout=s.stt_timeout_seconds)
 
 
 TTS_PROVIDERS = ("local", "piper", "neural", "elevenlabs", "azure")
