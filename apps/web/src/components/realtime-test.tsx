@@ -13,6 +13,17 @@ import { dialectName } from "@/lib/format";
 type Caption = { id: string; who: "caller" | "agent"; text: string; final: boolean };
 type RoomLike = { disconnect: () => Promise<void>; startAudio: () => Promise<void>; canPlaybackAudio: boolean };
 type AgentState = "initializing" | "listening" | "thinking" | "speaking" | string;
+type Recognizer = { provider: string; engine?: string; device?: string; model?: string };
+
+/** Where speech recognition runs, in words; slow = cannot keep up with a phone call. */
+function recognizerLabel(r: Recognizer): { label: string; slow: boolean } {
+  if (r.engine === "mlx") return { label: `Whisper ${r.model ?? ""} · Apple GPU`, slow: false };
+  if (r.engine === "faster-whisper") {
+    const gpu = r.device === "cuda";
+    return { label: `Whisper ${r.model ?? ""} · ${gpu ? "NVIDIA GPU" : "CPU"}`, slow: !gpu };
+  }
+  return { label: r.provider, slow: false };
+}
 
 const SPEAKING_LEVEL = 0.04; // microphone level (0-1) treated as the caller talking
 
@@ -60,6 +71,7 @@ export function RealtimeTest({ agentId, use }: { agentId: string; use: "draft" |
   const [captionAt, setCaptionAt] = useState(0);
   const [neverHeard, setNeverHeard] = useState(false);
   const stopLevel = useRef<(() => void) | null>(null);
+  const [recognizer, setRecognizer] = useState<Recognizer | null>(null);
 
   useEffect(() => () => stopLevel.current?.(), []);
   const onLevel = (value: number) => {
@@ -113,6 +125,7 @@ export function RealtimeTest({ agentId, use }: { agentId: string; use: "draft" |
     try {
       const { Room, RoomEvent, Track } = await import("livekit-client");
       const info = await post<{ url: string; token: string; room: string }>("/test/realtime", { agent_id: agentId, use });
+      get<{ stt: Recognizer }>("/test/providers").then((p) => setRecognizer(p.stt)).catch(() => undefined);
       const r = new Room({ adaptiveStream: true, dynacast: true });
       setCaptions([]);
       r.registerTextStreamHandler("lk.transcription", async (reader, participant) => {
@@ -173,6 +186,8 @@ export function RealtimeTest({ agentId, use }: { agentId: string; use: "draft" |
   };
 
   const lastUser = [...(detail?.messages ?? [])].reverse().find((m) => m.role === "user");
+  const recognizedIn = (lastUser?.metadata as { stt?: { latency_ms?: number } } | undefined)?.stt?.latency_ms;
+  const rec = recognizer ? recognizerLabel(recognizer) : null;
   const speaking = level >= SPEAKING_LEVEL;
   const recognizing = !speaking && heardAt > captionAt && agentState === "listening";
   const activity = speaking ? "Hearing you…" : agentState === "speaking" ? "Agent is speaking"
@@ -202,6 +217,13 @@ export function RealtimeTest({ agentId, use }: { agentId: string; use: "draft" |
               <span className={cn(recognizing && "animate-pulse")}>{activity}</span>
               {micName && <span className="ms-auto truncate text-xs text-muted-foreground" title={micName}>{micName}</span>}
             </div>
+          )}
+          {status === "connected" && rec?.slow && (
+            <Alert variant="warning" data-testid="slow-recognition">
+              Speech recognition runs on the CPU ({rec.label}), so each sentence takes several seconds to recognise - not
+              phone-call speed. On a Mac with Apple Silicon start Nexa with scripts/start-mac.sh (it runs recognition on
+              the Mac&apos;s GPU, well under a second); otherwise use an NVIDIA GPU or a cloud recogniser (ElevenLabs or Azure).
+            </Alert>
           )}
           {status === "connected" && neverHeard && (
             <Alert variant="warning">
@@ -240,6 +262,8 @@ export function RealtimeTest({ agentId, use }: { agentId: string; use: "draft" |
           {!detail && <p className="text-muted-foreground">
             {status !== "connected" ? "Start a real-time call to see live data." : !agentJoined ? "Waiting for the AI agent to join…" : "Waiting for the call to start…"}
           </p>}
+          {rec && <div data-testid="recognizer">Recognition: <b>{rec.label}</b>
+            {recognizedIn ? <> · last sentence in <b>{(recognizedIn / 1000).toFixed(1)} s</b></> : null}</div>}
           {detail && (<>
             <div>Language: <b>{detail.call.language ?? "-"}</b> · Dialect: <b>{dialectName(lastUser?.dialect ?? detail.call.dialect)}</b></div>
             <div>Intent: <b>{detail.call.intent ?? "-"}</b> · Avg response: {detail.call.metrics.avg_turn_latency_ms ?? "-"} ms</div>

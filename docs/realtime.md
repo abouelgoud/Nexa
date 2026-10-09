@@ -20,7 +20,10 @@ Phone calls and the browser "Real-time (WebRTC)" test use the same pipeline: Liv
 Per turn: end of the caller's speech is detected (~0.4 s of silence) → recognition → reply → voice. The call
 worker logs a `timing:` line for each stage, and the call page shows "recognized in" / "answered in" per turn.
 
-* **Recognition** (Whisper) is usually the slowest step without a GPU. On a Mac run it on the Apple GPU:
+* **Recognition** (Whisper) is usually the slowest step without a GPU. The language is picked first by a small
+  model (~0.4 s), so the large model runs once per sentence (on a 4-core CPU: 10.6 s -> 6 s for a 12 s sentence;
+  a live call here went from 24 s to 9.6 s). That is still not phone speed: the large model's cost is fixed per
+  sentence and needs a GPU. The live-call page shows where recognition runs and warns when it is the CPU. On a Mac run it on the Apple GPU:
   `scripts/start-mac.sh` (Docker; does this by default on Apple Silicon) or `scripts/dev-mac.sh` (native).
 * **Natural voices** render on the GPU; on a CPU they are far too slow for calls. Pre-rendered lines are instant on
   any machine; new sentences (times, names) take as long as their first short phrase. For the fastest natural

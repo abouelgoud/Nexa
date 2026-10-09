@@ -72,7 +72,8 @@ async def providers(ctx: TenantContext = Depends(get_tenant_context)) -> dict[st
     stt, tts, llm = get_stt(), get_tts(), get_llm()
     return {"local_ai": s.local_ai,
             "llm": {"provider": s.llm_provider, "model": s.llm_model, "healthy": await llm.health()},
-            "stt": {"provider": s.stt_provider, "healthy": await stt.health() if stt else False},
+            "stt": {"provider": s.stt_provider, "healthy": await stt.health() if stt else False,
+                    **(await stt.describe() if stt else {})},
             "tts": {"provider": s.tts_provider, "healthy": await tts.health() if tts else False}}
 
 

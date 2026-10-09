@@ -48,5 +48,9 @@ class STTProvider(ABC):
         buf = b"".join([c async for c in chunks])
         yield await self.transcribe(buf, language=language)
 
+    async def describe(self) -> dict:
+        """What runs the recognition (engine, device, model), for showing whether it can keep up with a call."""
+        return {}
+
     async def health(self) -> bool:
         return True

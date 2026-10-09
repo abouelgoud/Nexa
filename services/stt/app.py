@@ -31,6 +31,10 @@ CPU_THREADS = int(os.getenv("WHISPER_CPU_THREADS", "0")) or max(4, os.cpu_count(
 MLX_MODELS = {"large-v3-turbo": "mlx-community/whisper-large-v3-turbo", "large-v3": "mlx-community/whisper-large-v3-mlx",
               "small": "mlx-community/whisper-small-mlx"}
 MODEL_DIR = os.getenv("WHISPER_MODEL_DIR", "/models/whisper")
+# Picks the language first with a small model (~0.4 s on a CPU, Arabic vs English right on every test sentence), so
+# the large model runs once with the language fixed. Letting the large model detect costs it a whole extra pass
+# (5.3 s -> 10.6 s for a sentence on a 4-core CPU). Empty: let the large model detect.
+LID_MODEL = os.getenv("WHISPER_LID_MODEL", "base")
 # Biases decoding toward Arabic/English call vocabulary; callers can override per request.
 DEFAULT_PROMPT = os.getenv("WHISPER_PROMPT", "مكالمة هاتفية. Phone call in Arabic and English.")
 
@@ -41,6 +45,8 @@ _mlx_repo: str | None = None  # set when the mlx engine is active
 _ready = threading.Event()  # the model is loaded (it loads in the background; the first start downloads it)
 _load_error: str | None = None
 _load_lock = threading.Lock()
+_lid: WhisperModel | None = None
+_lid_lock = threading.Lock()
 
 
 def _use_mlx() -> bool:
@@ -90,13 +96,43 @@ def best_allowed(probs, allowed: list[str]) -> str:
     return max(allowed, key=lambda lang: scores.get(lang, 0.0))
 
 
+def lid_model() -> WhisperModel:
+    global _lid
+    with _lid_lock:
+        if _lid is None:
+            _lid = WhisperModel(LID_MODEL, device="cpu", compute_type="int8", download_root=MODEL_DIR,
+                                cpu_threads=CPU_THREADS)
+        return _lid
+
+
+def detect(samples) -> list[tuple[str, float]]:
+    """Language probabilities for the speech in ``samples`` (16 kHz float), from the small model."""
+    return lid_model().detect_language(audio=samples, vad_filter=True)[2]
+
+
+def pick_language(samples, language: str | None, allowed: list[str] | None) -> str | None:
+    """The language to recognise in, or None to let the large model detect it."""
+    if language:
+        return language
+    if allowed and len(allowed) == 1:
+        return allowed[0]
+    if not LID_MODEL:
+        return None
+    probs = detect(samples)
+    return best_allowed(probs, allowed) if allowed else max(probs, key=lambda p: p[1])[0]
+
+
+def _samples(audio: bytes):
+    return decode_audio(io.BytesIO(audio), sampling_rate=16000)
+
+
 def _faster_whisper(audio: bytes, language, prompt, hotwords, allowed=None) -> dict:
-    if not language and allowed and len(allowed) == 1:
-        language = allowed[0]
+    samples = _samples(audio)
+    language = pick_language(samples, language, allowed)
 
     def run(lang):
         return model().transcribe(
-            io.BytesIO(audio), language=lang or None, beam_size=BEAM, vad_filter=True,
+            samples, language=lang or None, beam_size=BEAM, vad_filter=True,
             initial_prompt=prompt, condition_on_previous_text=False,
             # Words the caller is likely to say (doctor names, specialties) - improves accuracy on names.
             hotwords=hotwords or None,
@@ -115,9 +151,8 @@ def _faster_whisper(audio: bytes, language, prompt, hotwords, allowed=None) -> d
 def _mlx(audio: bytes, language, prompt, hotwords, allowed=None) -> dict:
     import mlx_whisper
 
-    if not language and allowed and len(allowed) == 1:
-        language = allowed[0]
-    samples = decode_audio(io.BytesIO(audio), sampling_rate=16000)
+    samples = _samples(audio)
+    language = pick_language(samples, language, allowed)
 
     def run(lang):
         # mlx-whisper has no hotwords; putting them in the prompt recovers most of their benefit.
@@ -139,6 +174,8 @@ def _load_in_background() -> None:
     global _load_error
     try:
         load()
+        if LID_MODEL:
+            lid_model()
     except Exception as exc:  # noqa: BLE001 - reported by /health and to callers
         _load_error = f"{type(exc).__name__}: {exc}"
         log.exception("could not load the speech recognition model")
@@ -160,6 +197,7 @@ def _warm() -> None:
 def health() -> dict:
     status = "error" if _load_error else "ok" if _ready.is_set() else "loading"
     return {"status": status, "model": MODEL, "engine": "mlx" if _mlx_repo else "faster-whisper",
+            "device": "apple-gpu" if _mlx_repo else (_model.model.device if _model is not None else DEVICE),
             **({"error": _load_error} if _load_error else {})}
 
 

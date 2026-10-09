@@ -79,6 +79,14 @@ class WhisperHTTPSTT(STTProvider):
             latency_ms=(time.perf_counter() - start) * 1000,
         )
 
+    async def describe(self) -> dict:
+        try:
+            r = await self._client.get(self.base_url.rsplit("/v1", 1)[0] + "/health", timeout=3)
+            body = r.json()
+        except (httpx.HTTPError, ValueError):
+            return {}
+        return {k: body[k] for k in ("engine", "device", "model", "status") if k in body}
+
     async def health(self) -> bool:
         try:
             r = await self._client.get(self.base_url.rsplit("/v1", 1)[0] + "/health", timeout=3)
