@@ -14,7 +14,7 @@ The first template is **doctor appointment booking**, but the runtime is generic
 ```bash
 cp .env.example .env
 docker compose up -d --build               # web :3000, API :8000 (OpenAPI at /docs), LiveKit :7880
-scripts/start-mac.sh                        # on a Mac: the same, plus natural/cloned voices running on the Mac's GPU
+scripts/start-mac.sh                        # on a Mac: the same, with speech recognition and natural/cloned voices on the Mac's GPU
 ```
 
 Everything runs in Docker: database, API, web app, local LLM (llama.cpp + Qwen2.5 3B), speech recognition

@@ -2,7 +2,7 @@
 
 import type { CallDetail, CallSummary } from "@nexa/shared-types";
 import { Alert, Badge, Button, Card, CardContent, CardHeader, CardTitle, cn } from "@nexa/ui";
-import { PhoneOff, Radio, Volume2 } from "lucide-react";
+import { Mic, PhoneOff, Radio, Volume2 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
@@ -12,6 +12,25 @@ import { dialectName } from "@/lib/format";
 
 type Caption = { id: string; who: "caller" | "agent"; text: string; final: boolean };
 type RoomLike = { disconnect: () => Promise<void>; startAudio: () => Promise<void>; canPlaybackAudio: boolean };
+type AgentState = "initializing" | "listening" | "thinking" | "speaking" | string;
+
+const SPEAKING_LEVEL = 0.04; // microphone level (0-1) treated as the caller talking
+
+/** Live microphone level (0-1) from the published track, so the caller can see they are being heard. */
+function watchLevel(track: MediaStreamTrack, onLevel: (level: number) => void): () => void {
+  const ctx = new AudioContext();
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 1024;
+  ctx.createMediaStreamSource(new MediaStream([track])).connect(analyser);
+  const data = new Float32Array(analyser.fftSize);
+  const timer = setInterval(() => {
+    analyser.getFloatTimeDomainData(data);
+    let sum = 0;
+    for (const v of data) sum += v * v;
+    onLevel(Math.min(1, Math.sqrt(sum / data.length) * 4));
+  }, 100);
+  return () => { clearInterval(timer); void ctx.close(); };
+}
 
 /**
  * Real-time WebRTC test through LiveKit: the browser publishes the microphone, the Nexa voice runtime
@@ -32,6 +51,32 @@ export function RealtimeTest({ agentId, use }: { agentId: string; use: "draft" |
   const [captions, setCaptions] = useState<Caption[]>([]);
   const [error, setError] = useState<unknown>(null);
   const audioHost = useRef<HTMLDivElement>(null);
+  // What is happening right now: the caller's microphone level, the agent's state, and whether speech the caller
+  // finished is still being recognised (recognition can take seconds without a GPU).
+  const [level, setLevel] = useState(0);
+  const [micName, setMicName] = useState<string | null>(null);
+  const [agentState, setAgentState] = useState<AgentState>("initializing");
+  const [heardAt, setHeardAt] = useState(0);
+  const [captionAt, setCaptionAt] = useState(0);
+  const [neverHeard, setNeverHeard] = useState(false);
+  const stopLevel = useRef<(() => void) | null>(null);
+
+  useEffect(() => () => stopLevel.current?.(), []);
+  const onLevel = (value: number) => {
+    setLevel(value);
+    if (value >= SPEAKING_LEVEL) { setHeardAt(Date.now()); setNeverHeard(false); }
+  };
+  // Speech that never produced a caption (a cough, background noise) stops showing as "recognizing" after a while.
+  useEffect(() => {
+    if (!heardAt) return;
+    const timer = setTimeout(() => setCaptionAt((at) => Math.max(at, heardAt)), 90000);
+    return () => clearTimeout(timer);
+  }, [heardAt]);
+  useEffect(() => {
+    if (status !== "connected" || heardAt) return;
+    const timer = setTimeout(() => setNeverHeard(true), 10000);
+    return () => clearTimeout(timer);
+  }, [status, heardAt]);
 
   useEffect(() => {
     if (!roomName) return;
@@ -82,6 +127,7 @@ export function RealtimeTest({ agentId, use }: { agentId: string; use: "draft" |
         let text = "";
         for await (const chunk of reader) { text += chunk; show(text, false); }
         show(text, true);
+        if (who === "caller") setCaptionAt(Date.now());
       });
       r.on(RoomEvent.TrackSubscribed, (track) => {
         if (track.kind === Track.Kind.Audio) audioHost.current?.appendChild(track.attach());
@@ -92,15 +138,26 @@ export function RealtimeTest({ agentId, use }: { agentId: string; use: "draft" |
       r.on(RoomEvent.ParticipantConnected, (p) => {
         if (p.isAgent) { setAgentJoined(true); setProblem(null); }
       });
+      r.on(RoomEvent.ParticipantAttributesChanged, (_changed, p) => {
+        const state = p.attributes?.["lk.agent.state"];
+        if (p.isAgent && state) setAgentState(state);
+      });
       await r.connect(info.url, info.token);
       await r.startAudio().catch(() => undefined);
       setAudioBlocked(!r.canPlaybackAudio);
       if ([...r.remoteParticipants.values()].some((p) => p.isAgent)) setAgentJoined(true);
       try {
         await r.localParticipant.setMicrophoneEnabled(true);
+        const mic = r.localParticipant.getTrackPublication(Track.Source.Microphone)?.track?.mediaStreamTrack;
+        if (mic) {
+          setMicName(mic.label || null);
+          stopLevel.current?.();
+          stopLevel.current = watchLevel(mic, onLevel);
+        }
       } catch {
         setProblem("Microphone access was blocked. Allow the microphone for this site and start the call again.");
       }
+      setHeardAt(0); setCaptionAt(0); setNeverHeard(false); setAgentState("initializing");
       setRoom(r); setRoomName(info.room); setStatus("connected");
     } catch (e) {
       setStatus("idle");
@@ -110,11 +167,16 @@ export function RealtimeTest({ agentId, use }: { agentId: string; use: "draft" |
   };
 
   const end = async () => {
+    stopLevel.current?.(); stopLevel.current = null; setLevel(0);
     await room?.disconnect();
     setRoom(null); setStatus("ended");
   };
 
   const lastUser = [...(detail?.messages ?? [])].reverse().find((m) => m.role === "user");
+  const speaking = level >= SPEAKING_LEVEL;
+  const recognizing = !speaking && heardAt > captionAt && agentState === "listening";
+  const activity = speaking ? "Hearing you…" : agentState === "speaking" ? "Agent is speaking"
+    : agentState === "thinking" ? "Answering…" : recognizing ? "Recognizing what you said…" : "Listening";
   return (
     <div className="grid gap-6 lg:grid-cols-5">
       <Card className="lg:col-span-3">
@@ -126,10 +188,26 @@ export function RealtimeTest({ agentId, use }: { agentId: string; use: "draft" |
         </CardHeader>
         <CardContent className="space-y-3">
           <Alert variant="info">Speak naturally - you can interrupt the agent at any time. Uses the same runtime as phone calls.</Alert>
-          {status === "connected" && !problem && (
+          {status === "connected" && !problem && !(agentJoined && callId) && (
             <p className="text-sm text-muted-foreground">
-              {!agentJoined ? "Connected. Waiting for the AI agent to join…" : !callId ? "Agent joined. Starting the call…" : "Agent is listening - say something."}
+              {!agentJoined ? "Connected. Waiting for the AI agent to join…" : "Agent joined. Starting the call…"}
             </p>
+          )}
+          {status === "connected" && agentJoined && (
+            <div className="flex items-center gap-3 rounded-lg border p-2 text-sm" data-testid="mic-activity">
+              <Mic className={cn("h-4 w-4 shrink-0", speaking ? "text-emerald-600" : "text-muted-foreground")} />
+              <div className="h-2 w-24 shrink-0 overflow-hidden rounded bg-muted" title="Microphone level">
+                <div className="h-full bg-emerald-500 transition-[width] duration-100" style={{ width: `${Math.round(level * 100)}%` }} />
+              </div>
+              <span className={cn(recognizing && "animate-pulse")}>{activity}</span>
+              {micName && <span className="ms-auto truncate text-xs text-muted-foreground" title={micName}>{micName}</span>}
+            </div>
+          )}
+          {status === "connected" && neverHeard && (
+            <Alert variant="warning">
+              Your microphone is silent{micName ? ` (${micName})` : ""}. Check that the right input is selected and not
+              muted (macOS: System Settings → Sound → Input), and that the browser may use the microphone.
+            </Alert>
           )}
           {problem && <Alert variant="warning">{problem}</Alert>}
           {status === "connected" && audioBlocked && (

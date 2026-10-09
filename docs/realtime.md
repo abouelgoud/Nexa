@@ -21,7 +21,7 @@ Per turn: end of the caller's speech is detected (~0.4 s of silence) → recogni
 worker logs a `timing:` line for each stage, and the call page shows "recognized in" / "answered in" per turn.
 
 * **Recognition** (Whisper) is usually the slowest step without a GPU. On a Mac run it on the Apple GPU:
-  `scripts/stt-mac.sh` (Docker) or `scripts/dev-mac.sh` (native).
+  `scripts/start-mac.sh` (Docker; does this by default on Apple Silicon) or `scripts/dev-mac.sh` (native).
 * **Natural voices** render on the GPU; on a CPU they are far too slow for calls. Pre-rendered lines are instant on
   any machine; new sentences (times, names) take as long as their first short phrase. For the fastest natural
   voice, use ElevenLabs (cloud).

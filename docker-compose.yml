@@ -7,8 +7,8 @@
 #   docker compose --profile sip up -d          # + LiveKit SIP for real phone numbers
 #   docker compose --profile monitoring up -d   # + Prometheus & Grafana
 #
-# On a Mac, Docker can't use the GPU, so models run on the CPU. Speech recognition is the slow part; run it natively
-# on the Apple GPU instead (same accuracy, several times faster):
+# On a Mac, Docker can't use the GPU, so models run on the CPU. Speech recognition is the slow part:
+# scripts/start-mac.sh runs it natively on the Apple GPU instead (same accuracy, many times faster), or by hand:
 #   scripts/stt-mac.sh   and in .env:  STT_BASE_URL=http://host.docker.internal:8011/v1   (then: docker compose stop stt)
 # The LLM likewise: `ollama serve` + `ollama pull qwen2.5:3b`, and LLM_BASE_URL=http://host.docker.internal:11434/v1
 # Natural/cloned voices run on the Mac itself (Apple GPU), not in Docker: scripts/start-mac.sh starts both.
@@ -163,7 +163,11 @@ services:
       VOICE_MAX_CALLS: ${VOICE_MAX_CALLS:-4}   # capacity in calls, not CPU load (a busy CPU must not refuse calls)
     extra_hosts: ["host.docker.internal:host-gateway"]
     volumes: [recordings:/data/recordings]
-    depends_on: [livekit, api, stt, tts]
+    depends_on:
+      livekit: { condition: service_started }
+      api: { condition: service_started }
+      tts: { condition: service_started }
+      stt: { condition: service_started, required: false }  # on a Mac recognition may run natively instead
     mem_limit: 1g
     restart: unless-stopped
 
